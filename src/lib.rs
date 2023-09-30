@@ -1,6 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![feature(allocator_api)]
 #![feature(ptr_metadata)]
+#![feature(layout_for_ptr)]
 #![feature(decl_macro)]
 
 extern crate alloc;
@@ -57,11 +58,13 @@ impl GarbageCollector for DefaultGarbageCollector {
         &mut self,
         metadata: <GcObject<T> as core::ptr::Pointee>::Metadata,
     ) -> Result<NonNull<GcObject<T>>, AllocError> {
-        let layout = Layout::for_value(unsafe {
-            // # Safety
-            // This relies on the compiler to optimize &*null() by not _actually_ dereferencing it.
-            &*core::ptr::from_raw_parts::<GcObject<T>>(null(), metadata)
-        });
+        let layout = unsafe {
+            Layout::for_value_raw(
+                // # Safety
+                // This relies on the compiler to optimize &*null() by not _actually_ dereferencing it.
+                core::ptr::from_raw_parts::<GcObject<T>>(null(), metadata),
+            )
+        };
 
         // GcObject<T> is a DST so we need to allocate it
         let gc_object = unsafe {
