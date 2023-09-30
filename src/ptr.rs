@@ -69,20 +69,18 @@ impl<T: Mark> GcRoot<T> {
 
 impl<T: Mark> From<T> for GcRoot<T> {
     fn from(value: T) -> Self {
-        Self::new(value).expect(&format!(
-            "failed to allocate Gc<{}>",
-            core::any::type_name::<T>()
-        ))
+        Self::new(value)
+            .unwrap_or_else(|_| panic!("failed to allocate Gc<{}>", core::any::type_name::<T>()))
     }
 }
 
 impl From<&str> for GcRoot<str> {
     fn from(value: &str) -> Self {
         unsafe {
-            let mut root = Self::new_uninitialized_with_metadata(value.len()).expect(&format!(
-                "failed to allocate Gc<str> with length {}",
-                value.len()
-            ));
+            let mut root =
+                Self::new_uninitialized_with_metadata(value.len()).unwrap_or_else(|_| {
+                    panic!("failed to allocate Gc<str> with length {}", value.len())
+                });
 
             root.0
                 .ptr

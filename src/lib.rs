@@ -29,18 +29,10 @@ pub fn lock_default_gc<R, F: FnOnce(&mut DefaultGarbageCollector) -> R>(f: F) ->
     GC.lock_gc(f)
 }
 
+#[derive(Default)]
 pub struct DefaultGarbageCollector {
     #[cfg(feature = "std")]
     roots: std::collections::HashSet<AnyGcObject>,
-}
-
-impl Default for DefaultGarbageCollector {
-    fn default() -> Self {
-        DefaultGarbageCollector {
-            #[cfg(feature = "std")]
-            roots: std::collections::HashSet::new(),
-        }
-    }
 }
 
 #[cfg(feature = "std")]

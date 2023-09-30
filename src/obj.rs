@@ -96,14 +96,14 @@ mod dynamic {
     }
 
     pub trait SizedMetadata {
-        fn as_usize(self) -> usize;
+        fn to_usize(self) -> usize;
 
         fn from_usize(size: usize) -> Self;
     }
 
     impl SizedMetadata for usize {
         #[inline(always)]
-        fn as_usize(self) -> usize {
+        fn to_usize(self) -> usize {
             self
         }
 
@@ -115,11 +115,12 @@ mod dynamic {
 
     impl SizedMetadata for () {
         #[inline(always)]
-        fn as_usize(self) -> usize {
+        fn to_usize(self) -> usize {
             0
         }
 
         #[inline(always)]
+        #[allow(clippy::unused_unit)]
         fn from_usize(_: usize) -> Self {
             ()
         }
@@ -132,7 +133,7 @@ mod dynamic {
         {
             Self {
                 data: GcObjectPtr(ptr.cast()),
-                size: core::ptr::metadata(ptr.as_ptr()).as_usize(),
+                size: core::ptr::metadata(ptr.as_ptr()).to_usize(),
                 vtable: &GcObjectImpl {
                     mark: |data, size| unsafe {
                         core::ptr::from_raw_parts_mut::<GcObject<T>>(
