@@ -91,7 +91,18 @@ mod dynamic {
     impl core::hash::Hash for AnyGcObject {
         fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
             self.data.hash(state);
-            self.size.hash(state);
+        }
+    }
+
+    impl PartialOrd for AnyGcObject {
+        fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for AnyGcObject {
+        fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+            (self.data.0.as_ptr()).cmp(&(other.data.0.as_ptr()))
         }
     }
 

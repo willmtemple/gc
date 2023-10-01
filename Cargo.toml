@@ -7,9 +7,20 @@ edition = "2021"
 
 [features]
 default = ["std"]
-std = []
+std = ["dep:lazy_static"]
+
+[dev-dependencies]
+libc = "0.2"
 
 [dependencies]
-lazy_static = "1"
-
 spin = "0.9"
+lazy_static = { version = "1", optional = true}
+
+[profile.release]
+lto = true
+opt-level = "z"
+strip = true
+panic = "abort"
+codegen-units = 1
+
+
