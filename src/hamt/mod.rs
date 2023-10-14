@@ -19,13 +19,13 @@ type HashCode = u64;
 #[cfg(target_pointer_width = "32")]
 type HashCode = u32;
 
-pub trait HamtAllocator: Copy {
-    type Ptr<T: HamtNode<Self> + ?Sized>: Clone + Deref<Target = T>;
+pub trait HamtAllocator<K: Eq + Hash, V>: Copy {
+    type Ptr<T: HamtNode<K, V, Self> + ?Sized>: Clone + Deref<Target = T>;
 
-    type WrappedKvp<K: Eq + Hash, V>: Clone + Deref<Target = (K, V)>;
+    type WrappedKvp: Clone + Deref<Target = (K, V)>;
 
     /// Wraps a key-value pair.
-    fn wrap_kvp<K: Eq + Hash, V>(k: K, v: V) -> Self::WrappedKvp<K, V>;
+    fn wrap_kvp(k: K, v: V) -> Self::WrappedKvp;
 
     /// Allocate a region of memory for a node of type `T` with the given `metadata`.
     ///
@@ -36,7 +36,7 @@ pub trait HamtAllocator: Copy {
     /// undefinded behavior.
     ///
     /// Failing to honor the `metadata` parameter will cause undefined behavior.
-    unsafe fn allocate<T: HamtNode<Self> + ?Sized>(
+    unsafe fn allocate<T: HamtNode<K, V, Self> + ?Sized>(
         metadata: <T as Pointee>::Metadata,
         f: impl FnOnce(&mut T),
     ) -> Self::Ptr<T>;
@@ -46,9 +46,9 @@ pub trait HamtAllocator: Copy {
     /// # Safety
     ///
     /// This amounts to transmutation.
-    unsafe fn downgrade_ptr<T: HamtNode<Self> + ?Sized>(
+    unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
         ptr: Self::Ptr<T>,
-    ) -> Self::Ptr<NodeHeader<Self>>;
+    ) -> Self::Ptr<NodeHeader<K, V, Self>>;
 
     /// Upgrade a ref to a HAMT node into a pointer to a Node header.
     ///
@@ -56,28 +56,30 @@ pub trait HamtAllocator: Copy {
     ///
     /// This amounts to transmutation. This function yields undefined behavior if the underlying ref
     /// was not taken from a pointer that was obtained by calling `deref` on the result of `downgrade_ptr`.
-    unsafe fn upgrade_ref<T: HamtNode<Self> + ?Sized>(ptr: &T) -> Self::Ptr<NodeHeader<Self>>;
+    unsafe fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(
+        ptr: &T,
+    ) -> Self::Ptr<NodeHeader<K, V, Self>>;
 }
 
-pub trait HamtNode<Alloc: HamtAllocator> {
+pub trait HamtNode<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> {
     const TAG: NodeType;
 
-    fn header(&self) -> &NodeHeader<Alloc>;
+    fn header(&self) -> &NodeHeader<K, V, Alloc>;
 }
 
 #[derive(Clone, Copy)]
 pub struct DefaultGlobal;
 
-impl HamtAllocator for DefaultGlobal {
-    type Ptr<T: HamtNode<Self> + ?Sized> = Arc<T>;
+impl<K: Eq + Hash, V> HamtAllocator<K, V> for DefaultGlobal {
+    type Ptr<T: HamtNode<K, V, Self> + ?Sized> = Arc<T>;
 
-    type WrappedKvp<K: Eq + Hash, V> = Arc<(K, V)>;
+    type WrappedKvp = Arc<(K, V)>;
 
-    fn wrap_kvp<K: Eq + Hash, V>(k: K, v: V) -> Self::WrappedKvp<K, V> {
+    fn wrap_kvp(k: K, v: V) -> Self::WrappedKvp {
         Arc::new((k, v))
     }
 
-    unsafe fn allocate<T: HamtNode<Self> + ?Sized>(
+    unsafe fn allocate<T: HamtNode<K, V, Self> + ?Sized>(
         metadata: <T as Pointee>::Metadata,
         init: impl FnOnce(&mut T),
     ) -> Self::Ptr<T> {
@@ -119,19 +121,21 @@ impl HamtAllocator for DefaultGlobal {
         unsafe { Arc::from_raw(data) }
     }
 
-    unsafe fn downgrade_ptr<T: HamtNode<Self> + ?Sized>(
+    unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
         ptr: Self::Ptr<T>,
-    ) -> Self::Ptr<NodeHeader<Self>> {
+    ) -> Self::Ptr<NodeHeader<K, V, Self>> {
         unsafe {
-            let raw = ptr.header() as *const _ as *const NodeHeader<Self>;
+            let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
             Arc::increment_strong_count(raw);
             Arc::from_raw(raw)
         }
     }
 
-    unsafe fn upgrade_ref<T: HamtNode<Self> + ?Sized>(ptr: &T) -> Self::Ptr<NodeHeader<Self>> {
+    unsafe fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(
+        ptr: &T,
+    ) -> Self::Ptr<NodeHeader<K, V, Self>> {
         unsafe {
-            let raw = ptr.header() as *const _ as *const NodeHeader<Self>;
+            let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
             Arc::increment_strong_count(raw);
             Arc::from_raw(raw)
         }
@@ -144,10 +148,10 @@ pub struct Hamt<
     V,
     #[cfg(feature = "std")] HamtHasher: Hasher + Default = std::collections::hash_map::DefaultHasher,
     #[cfg(not(feature = "std"))] HamtHasher: Hasher + Default,
-    Alloc: HamtAllocator = DefaultGlobal,
+    Alloc: HamtAllocator<K, V> = DefaultGlobal,
 > {
     _ph: PhantomData<(K, V, Alloc, HamtHasher)>,
-    root: Option<Alloc::Ptr<NodeHeader<Alloc>>>,
+    root: Option<Alloc::Ptr<NodeHeader<K, V, Alloc>>>,
 }
 
 impl<K: Eq + Hash, V, HamtHasher: Hasher + Default> Hamt<K, V, HamtHasher> {
@@ -156,7 +160,7 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default> Hamt<K, V, HamtHasher> {
     }
 }
 
-impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Alloc: HamtAllocator>
+impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Alloc: HamtAllocator<K, V>>
     Hamt<K, V, HamtHasher, Alloc>
 {
     fn with_allocator(_: Alloc) -> Self {
@@ -177,7 +181,7 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Alloc: HamtAllocator>
         let mut node_cursor = self.root.as_ref();
 
         while let Some(node) = node_cursor {
-            match node.deref().upgrade::<K, V>() {
+            match node.deref().upgrade() {
                 NodePtr::Leaf(leaf) => return leaf.get(key, hash),
                 NodePtr::Inner(node) => {
                     node_cursor = node.get_child(hash, level);
@@ -231,14 +235,14 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Alloc: HamtAllocator>
         fn print_node<
             K: Eq + Hash + core::fmt::Debug,
             V: core::fmt::Debug,
-            Alloc: HamtAllocator,
+            Alloc: HamtAllocator<K, V>,
         >(
-            node: &Alloc::Ptr<NodeHeader<Alloc>>,
+            node: &Alloc::Ptr<NodeHeader<K, V, Alloc>>,
             level: usize,
         ) {
             let spaces = " ".repeat(level * 2);
 
-            match node.deref().upgrade::<K, V>() {
+            match node.deref().upgrade() {
                 NodePtr::Leaf(leaf) => {
                     println!("{}- Leaf (hash: {:#066b}):", spaces, leaf.hash);
                     for kvp in leaf.values.iter() {
@@ -299,17 +303,25 @@ impl NodeHeader {
 }
 
 #[cfg(target_pointer_width = "64")]
-#[derive(Clone, Copy)]
-pub struct NodeHeader<Alloc: HamtAllocator> {
-    _ph: PhantomData<Alloc>,
+// #[derive(Clone, Copy)]
+pub struct NodeHeader<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> {
+    _ph: PhantomData<(K, V, Alloc)>,
     tag_size: usize,
 }
 
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> Copy for NodeHeader<K, V, Alloc> {}
+
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> Clone for NodeHeader<K, V, Alloc> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 #[cfg(target_pointer_width = "64")]
-impl<Alloc: HamtAllocator> NodeHeader<Alloc> {
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> NodeHeader<K, V, Alloc> {
     const TAG_MASK: usize = 0b111 << 61;
 
-    unsafe fn new<T: HamtNode<Alloc> + ?Sized>(metadata: usize) -> Self {
+    unsafe fn new<T: HamtNode<K, V, Alloc> + ?Sized>(metadata: usize) -> Self {
         debug_assert!(metadata <= !Self::TAG_MASK);
 
         Self {
@@ -326,32 +338,34 @@ impl<Alloc: HamtAllocator> NodeHeader<Alloc> {
         self.tag_size & !Self::TAG_MASK
     }
 
-    fn insert<K: Eq + Hash, V>(&self, k: K, v: V, path: Path) -> Alloc::Ptr<NodeHeader<Alloc>> {
-        match self.upgrade::<K, V>() {
+    fn insert(&self, k: K, v: V, path: Path) -> Alloc::Ptr<NodeHeader<K, V, Alloc>> {
+        match self.upgrade() {
             NodePtr::Leaf(node) => node.insert(k, v, path),
             NodePtr::Inner(node) => node.insert(k, v, path),
         }
     }
 }
 
-impl<Alloc: HamtAllocator> HamtNode<Alloc> for NodeHeader<Alloc> {
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> HamtNode<K, V, Alloc>
+    for NodeHeader<K, V, Alloc>
+{
     const TAG: NodeType = NodeType::_Header;
 
-    fn header(&self) -> &NodeHeader<Alloc> {
+    fn header(&self) -> &NodeHeader<K, V, Alloc> {
         self
     }
 }
 
-enum NodePtr<'a, K: Eq + Hash, V, Alloc: HamtAllocator> {
+enum NodePtr<'a, K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> {
     Leaf(&'a LeafNode<K, V, Alloc>),
-    Inner(&'a InnerNode<Alloc>),
+    Inner(&'a InnerNode<K, V, Alloc>),
 }
 
-impl<Alloc: HamtAllocator> NodeHeader<Alloc> {
-    fn upgrade<K: Eq + Hash, V>(&self) -> NodePtr<K, V, Alloc>
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> NodeHeader<K, V, Alloc> {
+    fn upgrade(&self) -> NodePtr<K, V, Alloc>
     where
         <LeafNode<K, V, Alloc> as Pointee>::Metadata: SizedMetadata,
-        <InnerNode<Alloc> as Pointee>::Metadata: SizedMetadata,
+        <InnerNode<K, V, Alloc> as Pointee>::Metadata: SizedMetadata,
     {
         match self.tag() {
             NodeType::Leaf => NodePtr::Leaf(unsafe {
@@ -363,24 +377,32 @@ impl<Alloc: HamtAllocator> NodeHeader<Alloc> {
             NodeType::Inner => NodePtr::Inner(unsafe {
                 &*(core::ptr::from_raw_parts(
                     self as *const _ as *const (),
-                    <InnerNode<Alloc> as Pointee>::Metadata::from_usize(self.metadata()),
+                    <InnerNode<K, V, Alloc> as Pointee>::Metadata::from_usize(self.metadata()),
                 ))
             }),
             NodeType::_Header => unreachable!(),
         }
     }
 
-    // unsafe fn reinterpret_mut<T: HamtNode<Alloc> + ?Sized>(&mut self) -> &mut T
-    // where
-    //     <T as Pointee>::Metadata: SizedMetadata,
-    // {
-    //     debug_assert!(self.tag() == T::TAG);
+    unsafe fn reinterpret_mut<T: HamtNode<K, V, Alloc> + ?Sized>(&mut self) -> &mut T
+    where
+        <T as Pointee>::Metadata: SizedMetadata,
+    {
+        debug_assert!(self.tag() == T::TAG);
 
-    //     &mut *(core::ptr::from_raw_parts_mut(
-    //         self as *mut _ as *mut (),
-    //         <T as Pointee>::Metadata::from_usize(self.metadata()),
-    //     ))
-    // }
+        &mut *(core::ptr::from_raw_parts_mut(
+            self as *mut _ as *mut (),
+            <T as Pointee>::Metadata::from_usize(self.metadata()),
+        ))
+    }
+
+    unsafe fn dispose(&mut self) {
+        match self.tag() {
+            NodeType::Leaf => todo!(),
+            NodeType::Inner => todo!(),
+            NodeType::_Header => unreachable!(),
+        }
+    }
 }
 
 #[cfg(target_pointer_width = "64")]
@@ -445,14 +467,18 @@ impl Path {
 }
 
 #[repr(C)]
-struct InnerNode<Alloc: HamtAllocator> {
-    _header: NodeHeader<Alloc>,
+struct InnerNode<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> {
+    _header: NodeHeader<K, V, Alloc>,
     bitmap: Bitmap,
-    children: [Alloc::Ptr<NodeHeader<Alloc>>],
+    children: [Alloc::Ptr<NodeHeader<K, V, Alloc>>],
 }
 
-impl<Alloc: HamtAllocator> InnerNode<Alloc> {
-    fn get_child(&self, hash: HashCode, level: usize) -> Option<&Alloc::Ptr<NodeHeader<Alloc>>> {
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> InnerNode<K, V, Alloc> {
+    fn get_child(
+        &self,
+        hash: HashCode,
+        level: usize,
+    ) -> Option<&Alloc::Ptr<NodeHeader<K, V, Alloc>>> {
         debug_assert!(level <= MAX_LEVEL);
 
         let index = hash_bits_for_level(hash, level + 1);
@@ -468,12 +494,7 @@ impl<Alloc: HamtAllocator> InnerNode<Alloc> {
         }
     }
 
-    fn insert<K: Eq + Hash, V>(
-        &self,
-        key: K,
-        value: V,
-        path: Path,
-    ) -> Alloc::Ptr<NodeHeader<Alloc>> {
+    fn insert(&self, key: K, value: V, path: Path) -> Alloc::Ptr<NodeHeader<K, V, Alloc>> {
         debug_assert!(path.level <= MAX_LEVEL);
 
         let index = hash_bits_for_level(path.hash, path.level + 1);
@@ -548,24 +569,24 @@ impl<Alloc: HamtAllocator> InnerNode<Alloc> {
     }
 }
 
-impl<Alloc: HamtAllocator> HamtNode<Alloc> for InnerNode<Alloc> {
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> HamtNode<K, V, Alloc> for InnerNode<K, V, Alloc> {
     const TAG: NodeType = NodeType::Inner;
 
-    fn header(&self) -> &NodeHeader<Alloc> {
+    fn header(&self) -> &NodeHeader<K, V, Alloc> {
         &self._header
     }
 }
 
 #[repr(C)]
-struct LeafNode<K: Eq + Hash, V, Alloc: HamtAllocator> {
-    _header: NodeHeader<Alloc>,
+struct LeafNode<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> {
+    _header: NodeHeader<K, V, Alloc>,
     _ph: PhantomData<Alloc>,
     hash: HashCode,
     // path: Path,
-    values: [Alloc::WrappedKvp<K, V>],
+    values: [Alloc::WrappedKvp],
 }
 
-impl<K: Eq + Hash, V, Alloc: HamtAllocator> LeafNode<K, V, Alloc> {
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> LeafNode<K, V, Alloc> {
     fn get(&self, key: &K, hash: HashCode) -> Option<&V> {
         if hash != self.hash {
             None
@@ -577,7 +598,7 @@ impl<K: Eq + Hash, V, Alloc: HamtAllocator> LeafNode<K, V, Alloc> {
         }
     }
 
-    fn insert(&self, key: K, value: V, path: Path) -> Alloc::Ptr<NodeHeader<Alloc>> {
+    fn insert(&self, key: K, value: V, path: Path) -> Alloc::Ptr<NodeHeader<K, V, Alloc>> {
         debug_assert!(path.level <= MAX_LEVEL);
         // debug_assert!(path.level == self.path.level);
         debug_assert_eq!(
@@ -609,8 +630,8 @@ impl<K: Eq + Hash, V, Alloc: HamtAllocator> LeafNode<K, V, Alloc> {
             };
 
             let new_inner = unsafe {
-                Alloc::allocate::<InnerNode<Alloc>>(size, move |inner| {
-                    inner._header = NodeHeader::new::<InnerNode<Alloc>>(size);
+                Alloc::allocate::<InnerNode<K, V, Alloc>>(size, move |inner| {
+                    inner._header = NodeHeader::new::<InnerNode<K, V, Alloc>>(size);
                     inner.bitmap = bitmap;
 
                     match size {
@@ -658,7 +679,7 @@ impl<K: Eq + Hash, V, Alloc: HamtAllocator> LeafNode<K, V, Alloc> {
         }
     }
 
-    fn create_with_pair(key: K, value: V, path: Path) -> Alloc::Ptr<NodeHeader<Alloc>> {
+    fn create_with_pair(key: K, value: V, path: Path) -> Alloc::Ptr<NodeHeader<K, V, Alloc>> {
         unsafe {
             Alloc::downgrade_ptr({
                 Alloc::allocate::<LeafNode<K, V, Alloc>>(1, |leaf| {
@@ -670,7 +691,7 @@ impl<K: Eq + Hash, V, Alloc: HamtAllocator> LeafNode<K, V, Alloc> {
 
                     debug_assert!(
                         (&leaf.values[..] as *const _ as *const () as usize)
-                            % core::mem::align_of::<Alloc::WrappedKvp<K, V>>()
+                            % core::mem::align_of::<Alloc::WrappedKvp>()
                             == 0
                     );
 
@@ -678,7 +699,7 @@ impl<K: Eq + Hash, V, Alloc: HamtAllocator> LeafNode<K, V, Alloc> {
 
                     debug_assert!(
                         (&leaf.values[0] as *const _ as *const () as usize)
-                            % core::mem::align_of::<Alloc::WrappedKvp<K, V>>()
+                            % core::mem::align_of::<Alloc::WrappedKvp>()
                             == 0
                     );
 
@@ -688,7 +709,7 @@ impl<K: Eq + Hash, V, Alloc: HamtAllocator> LeafNode<K, V, Alloc> {
         }
     }
 
-    unsafe fn add_pair(&self, key: K, value: V) -> Alloc::Ptr<NodeHeader<Alloc>> {
+    unsafe fn add_pair(&self, key: K, value: V) -> Alloc::Ptr<NodeHeader<K, V, Alloc>> {
         let cur_value = self.values.iter().enumerate().find(|(_, kvp)| kvp.0 == key);
 
         if let Some((idx, _)) = cur_value {
@@ -734,10 +755,10 @@ impl<K: Eq + Hash, V, Alloc: HamtAllocator> LeafNode<K, V, Alloc> {
     }
 }
 
-impl<K: Eq + Hash, V, Alloc: HamtAllocator> HamtNode<Alloc> for LeafNode<K, V, Alloc> {
+impl<K: Eq + Hash, V, Alloc: HamtAllocator<K, V>> HamtNode<K, V, Alloc> for LeafNode<K, V, Alloc> {
     const TAG: NodeType = NodeType::Leaf;
 
-    fn header(&self) -> &NodeHeader<Alloc> {
+    fn header(&self) -> &NodeHeader<K, V, Alloc> {
         &self._header
     }
 }
@@ -771,7 +792,7 @@ mod tests {
 
         let mut hamts = vec![hamt_0, hamt_1];
 
-        for i in 2..100 {
+        for i in 2..10000 {
             hamt = hamt.insert(i, i + 1);
             hamts.push(hamt.clone());
 
@@ -799,7 +820,8 @@ mod tests {
 
         assert_eq!(node_ptr as usize, node_header_ptr as usize);
 
-        let data = unsafe { DefaultGlobal::allocate::<InnerNode<DefaultGlobal>>(0, |_| {}) };
+        let data =
+            unsafe { DefaultGlobal::allocate::<InnerNode<(), (), DefaultGlobal>>(0, |_| {}) };
 
         let node_ptr = data.as_ref() as *const _ as *const ();
         let node_header_ptr = &data._header as *const _ as *const ();
