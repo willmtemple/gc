@@ -57,6 +57,15 @@ pub trait HamtAllocator: Copy {
     /// This amounts to transmutation. This function yields undefined behavior if the underlying ref
     /// was not taken from a pointer that was obtained by calling `deref` on the result of `downgrade_ptr`.
     unsafe fn upgrade_ref<T: HamtNode<Self> + ?Sized>(ptr: &T) -> Self::Ptr<NodeHeader<Self>>;
+
+    /// Drop a pointer to a HAMT node.
+    ///
+    /// # Safety
+    ///
+    /// This implementation must take care not to free underlying memory if it is still in use. For that purpose, some
+    /// kind of reference counting or tracing garbage collection _MUST_ be used to ensure that the memory is not freed
+    /// while it is still in use.
+    unsafe fn drop_ptr<T: HamtNode<Self> + ?Sized>(ptr: Self::Ptr<T>);
 }
 
 pub trait HamtNode<Alloc: HamtAllocator> {
@@ -135,6 +144,10 @@ impl HamtAllocator for DefaultGlobal {
             Arc::increment_strong_count(raw);
             Arc::from_raw(raw)
         }
+    }
+
+    unsafe fn drop_ptr<T: HamtNode<Self> + ?Sized>(ptr: Self::Ptr<T>) {
+        core::mem::drop(ptr);
     }
 }
 
