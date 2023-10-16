@@ -106,13 +106,13 @@ mod dynamic {
         }
     }
 
-    pub trait SizedMetadata {
+    pub trait UsizeMetadata {
         fn to_usize(self) -> usize;
 
         fn from_usize(size: usize) -> Self;
     }
 
-    impl SizedMetadata for usize {
+    impl UsizeMetadata for usize {
         #[inline(always)]
         fn to_usize(self) -> usize {
             self
@@ -124,7 +124,7 @@ mod dynamic {
         }
     }
 
-    impl SizedMetadata for () {
+    impl UsizeMetadata for () {
         #[inline(always)]
         fn to_usize(self) -> usize {
             0
@@ -140,7 +140,7 @@ mod dynamic {
     impl AnyGcObject {
         pub fn new<T: Mark + ?Sized>(ptr: NonNull<GcObject<T>>) -> Self
         where
-            <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+            <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
         {
             Self {
                 data: GcObjectPtr(ptr.cast()),

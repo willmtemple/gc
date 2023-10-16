@@ -7,18 +7,18 @@ use core::{
 use crate::{
     lock_default_gc,
     mark::Mark,
-    obj::{GcObject, SizedMetadata},
+    obj::{GcObject, UsizeMetadata},
     GarbageCollector,
 };
 
 #[repr(transparent)]
 pub struct GcRoot<T: Mark + ?Sized>(pub(crate) Gc<T>)
 where
-    <GcObject<T> as Pointee>::Metadata: SizedMetadata;
+    <GcObject<T> as Pointee>::Metadata: UsizeMetadata;
 
 impl<T: Mark + ?Sized> Deref for GcRoot<T>
 where
-    <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+    <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
 {
     type Target = T;
 
@@ -29,7 +29,7 @@ where
 
 impl<T: Mark + ?Sized> GcRoot<T>
 where
-    <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+    <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
 {
     /// # Safety
     /// Callers must ensure that the return value of this function is stored in a location that is connected to the GC
@@ -96,7 +96,7 @@ impl From<&str> for GcRoot<str> {
 
 impl<T: Mark + ?Sized> Drop for GcRoot<T>
 where
-    <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+    <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
 {
     fn drop(&mut self) {
         lock_default_gc(|gc| gc.unroot(self.0.ptr))

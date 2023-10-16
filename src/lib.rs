@@ -17,7 +17,7 @@ use core::{
 
 use alloc::alloc::Global;
 use mark::Mark;
-use obj::{AllocMetadata, AnyGcObject, GcObject, SizedMetadata};
+use obj::{AllocMetadata, AnyGcObject, GcObject, UsizeMetadata};
 
 pub mod mark;
 pub mod obj;
@@ -74,14 +74,14 @@ impl GarbageCollector for DefaultGarbageCollector {
 
     fn root<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
     {
         self.roots.insert(AnyGcObject::new(ptr));
     }
 
     fn unroot<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
     {
         self.roots.remove(&AnyGcObject::new(ptr));
     }
@@ -105,14 +105,14 @@ impl GarbageCollector for DefaultGarbageCollector {
 
     fn root<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
     {
         self.roots.insert(AnyGcObject::new(ptr));
     }
 
     fn unroot<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
     {
         self.roots.remove(&AnyGcObject::new(ptr));
     }
@@ -123,11 +123,11 @@ pub trait GarbageCollector {
 
     fn root<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: SizedMetadata;
+        <GcObject<T> as Pointee>::Metadata: UsizeMetadata;
 
     fn unroot<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: SizedMetadata;
+        <GcObject<T> as Pointee>::Metadata: UsizeMetadata;
 
     fn allocate<T: Mark + ?Sized>(
         &mut self,

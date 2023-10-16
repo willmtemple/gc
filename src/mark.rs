@@ -1,7 +1,7 @@
 use core::ptr::Pointee;
 
 use crate::{
-    obj::{GcObject, SizedMetadata},
+    obj::{GcObject, UsizeMetadata},
     ptr::{Gc, GcRoot},
 };
 
@@ -11,7 +11,7 @@ pub trait Mark {
 
 impl<T: Mark + ?Sized> Mark for GcRoot<T>
 where
-    <GcObject<T> as Pointee>::Metadata: SizedMetadata,
+    <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
 {
     fn mark(&mut self) {
         // Roots do not mark their referent because they are the roots of the mark phase.
