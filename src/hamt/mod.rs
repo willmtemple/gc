@@ -1146,14 +1146,28 @@ mod tests {
         // Check that the offset of _header within the node type is 0 i.e. that a pointer
         // to the node type is also a pointer to the header.
 
-        let data = DefaultGlobal::allocate::<LeafNode<(), (), DefaultGlobal>>(0, |_| {});
+        let data = DefaultGlobal::allocate::<LeafNode<(), (), DefaultGlobal>>(0, |leaf| {
+            unsafe {
+                core::ptr::write(
+                    &mut leaf._header,
+                    crate::hamt::NodeHeader::new::<LeafNode<(), (), DefaultGlobal>>(0),
+                )
+            };
+        });
 
         let node_ptr = data.as_ref() as *const _ as *const ();
         let node_header_ptr = &data._header as *const _ as *const ();
 
         assert_eq!(node_ptr as usize, node_header_ptr as usize);
 
-        let data = DefaultGlobal::allocate::<InnerNode<(), (), DefaultGlobal>>(0, |_| {});
+        let data = DefaultGlobal::allocate::<InnerNode<(), (), DefaultGlobal>>(0, |inner| {
+            unsafe {
+                core::ptr::write(
+                    &mut inner._header,
+                    crate::hamt::NodeHeader::new::<InnerNode<(), (), DefaultGlobal>>(0),
+                )
+            };
+        });
 
         let node_ptr = data.as_ref() as *const _ as *const ();
         let node_header_ptr = &data._header as *const _ as *const ();

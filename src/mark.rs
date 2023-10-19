@@ -1,28 +1,21 @@
-use core::ptr::Pointee;
-
-use crate::{
-    obj::{GcObject, UsizeMetadata},
-    ptr::{Gc, GcRoot},
-};
-
 pub trait Mark {
     fn mark(&mut self);
 }
 
-impl<T: Mark + ?Sized> Mark for GcRoot<T>
-where
-    <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
-{
-    fn mark(&mut self) {
-        // Roots do not mark their referent because they are the roots of the mark phase.
-    }
-}
+// impl<T: Mark + ?Sized> Mark for GcRoot<T>
+// where
+//     <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
+// {
+//     fn mark(&mut self) {
+//         // Roots do not mark their referent because they are the roots of the mark phase.
+//     }
+// }
 
-impl<T: Mark + ?Sized> Mark for Gc<T> {
-    fn mark(&mut self) {
-        unsafe { self.ptr.as_mut() }.mark()
-    }
-}
+// impl<T: Mark + ?Sized> Mark for Gc<T> {
+//     fn mark(&mut self) {
+//         unsafe { self.ptr.as_mut() }.mark()
+//     }
+// }
 
 // impl<T: Mark + ?Sized> Mark for GcWeak<T> {
 //     fn mark(&mut self) {
