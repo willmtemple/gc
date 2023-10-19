@@ -7,9 +7,10 @@ edition = "2021"
 
 [features]
 default = ["std"]
-std = []
+std = ["rand/std"]
 
 [dependencies]
 lazy_static = "1"
+rand = { version = "0.8", default-features="false", features=["getrandom"]}
 
 spin = "0.9"
