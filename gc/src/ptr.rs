@@ -83,11 +83,8 @@ where
     /// # Safety
     /// Callers must ensure that the pointer is valid and points to a GC object that has been initialized. The object
     /// is immediately rooted.
-    pub unsafe fn from_raw(ptr: NonNull<Object<T>>) -> Self {
-        lock_default_gc(|gc| {
-            gc.root(ptr);
-            Self(Raw { ptr })
-        })
+    pub unsafe fn from_raw(raw: Raw<T>) -> Self {
+        Self(raw)
     }
 
     pub fn get_weak(&self) -> Weak<T> {
@@ -205,7 +202,7 @@ impl<T: Mark + ?Sized> Weak<T> {
     where
         <Object<T> as Pointee>::Metadata: UsizeMetadata,
     {
-        self.is_present_and(|this| unsafe { Root::from_raw(this.ptr.ptr) })
+        self.is_present_and(|root| root)
     }
 
     pub fn upgrade_and_then<U>(&self, f: impl FnOnce(&T) -> U) -> Option<U>
@@ -219,19 +216,25 @@ impl<T: Mark + ?Sized> Weak<T> {
     ///
     /// NOTE: The object may be collected at any time, including immediately after this function returns.
     pub fn is_present(&self) -> bool {
-        self.is_present_and(|_| ()).is_some()
+        lock_default_gc(|gc| gc.is_present(self.ptr.ptr, self.identity))
     }
 
-    /// Checks if the object is present and calls the given function with a reference to this Weak pointer if it is.
+    /// Checks if the object is present and calls the given function with a [`Root`] to the object if it is.
     ///
-    /// The object's presence is guaranteed for the duration of the call.
-    pub fn is_present_and<U>(&self, f: impl FnOnce(&Self) -> U) -> Option<U> {
-        lock_default_gc(|gc| {
+    /// The object's presence is guaranteed as long as the [`Root`] is held.
+    pub fn is_present_and<U>(&self, f: impl FnOnce(Root<T>) -> U) -> Option<U>
+    where
+        <Object<T> as Pointee>::Metadata: UsizeMetadata,
+    {
+        let root = lock_default_gc(|gc| {
             if gc.is_present(self.ptr.ptr, self.identity) {
-                Some(f(self))
+                gc.root(self.ptr.ptr);
+                Some(unsafe { Root::from_raw(self.ptr) })
             } else {
                 None
             }
-        })
+        })?;
+
+        Some(f(root))
     }
 }
