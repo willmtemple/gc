@@ -98,7 +98,7 @@ mod io {
                 h_out,
                 v.as_ptr() as win::LPVOID,
                 v.len() as win::DWORD,
-                &mut written as win::LPDWORD,
+                &mut written,
                 core::ptr::null_mut(),
             )
         };

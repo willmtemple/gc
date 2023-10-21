@@ -6,6 +6,7 @@
 #![feature(associated_type_defaults)]
 #![feature(new_uninit)]
 #![feature(lazy_cell)]
+#![feature(offset_of)]
 
 extern crate alloc;
 
@@ -13,11 +14,12 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     ops::DerefMut,
     ptr::{null, NonNull, Pointee},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use alloc::alloc::Global;
 use mark::Mark;
-use obj::{AllocMetadata, AnyGcObject, GcObject, GcObjectHeader, GcObjectIdentity, UsizeMetadata};
+use obj::{AllocMetadata, AnyGcObject, GcObjectHeader, GcObjectIdentity, Object, UsizeMetadata};
 
 pub mod mark;
 pub mod obj;
@@ -34,14 +36,29 @@ pub fn lock_default_gc<R, F: FnOnce(&mut DefaultGarbageCollector) -> R>(f: F) ->
 }
 
 #[cfg(feature = "std")]
-pub fn lock_default_gc<R, F: FnOnce(&mut DefaultGarbageCollector) -> R>(f: F) -> R {
+mod _gc {
+    use core::ops::DerefMut;
+
+    use crate::DefaultGarbageCollector;
+
     lazy_static::lazy_static!(
         static ref GC: std::sync::Mutex<DefaultGarbageCollector> =
             std::sync::Mutex::new(DefaultGarbageCollector::new());
     );
 
-    f(GC.lock().expect("failed to acquire lock").deref_mut())
+    pub fn lock_default_gc<R>(f: impl FnOnce(&mut DefaultGarbageCollector) -> R) -> R {
+        f(GC.lock().expect("failed to acquire lock").deref_mut())
+    }
+
+    pub fn inhibit_collections<R>(f: impl FnOnce() -> R) -> R {
+        GC.lock().expect("failed to acquire lock").inhibit();
+        let r = f();
+        GC.lock().expect("failed to acquire lock").uninhibit();
+        r
+    }
 }
+
+pub use _gc::*;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 struct Allocation(NonNull<GcObjectHeader<()>>);
@@ -52,7 +69,7 @@ unsafe impl Sync for Allocation {}
 
 impl Allocation {
     fn deallocate(self) {
-        let header = unsafe { &*self.0.as_ptr() };
+        let header = unsafe { &mut *self.0.as_ptr() };
 
         let layout = unsafe {
             Layout::from_size_align_unchecked(
@@ -60,6 +77,10 @@ impl Allocation {
                 header.alloc_metadata.get_align(),
             )
         };
+
+        // Zero the identity nonce and instant so that even if this object is reallocated, existing weak pointers
+        // will not be able to upgrade.
+        header.identity = unsafe { core::mem::zeroed() };
 
         unsafe {
             Global.deallocate(
@@ -83,6 +104,8 @@ pub struct DefaultGarbageCollector {
 
     #[cfg(not(feature = "std"))]
     seq: u64,
+
+    inhibitors: AtomicUsize,
 }
 
 impl DefaultGarbageCollector {
@@ -92,6 +115,7 @@ impl DefaultGarbageCollector {
             roots: alloc::collections::BTreeMap::new(),
             presence_set: alloc::collections::BTreeSet::new(),
             seq: 0,
+            inhibitors: AtomicUsize::new(0),
         }
     }
 
@@ -100,12 +124,13 @@ impl DefaultGarbageCollector {
         Self {
             roots: std::collections::HashMap::new(),
             presence_set: std::collections::HashSet::new(),
+            inhibitors: AtomicUsize::new(0),
         }
     }
 
     pub fn is_present<T: Mark + ?Sized>(
         &self,
-        ptr: NonNull<GcObject<T>>,
+        ptr: NonNull<Object<T>>,
         identity: GcObjectIdentity,
     ) -> bool {
         let allocation = Allocation(unsafe {
@@ -142,6 +167,14 @@ impl DefaultGarbageCollector {
         }
     }
 
+    fn inhibit(&mut self) {
+        self.inhibitors.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn uninhibit(&mut self) {
+        self.inhibitors.fetch_sub(1, Ordering::SeqCst);
+    }
+
     #[cfg(not(feature = "std"))]
     fn rand(&self) -> u64 {
         use rand::{rngs::OsRng, RngCore};
@@ -164,15 +197,20 @@ impl GcLock for spin::Mutex<DefaultGarbageCollector> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum GcError {
+    Inhibited,
+}
+
 impl GarbageCollector for DefaultGarbageCollector {
     #[cfg(feature = "std")]
     type Locked = std::sync::Mutex<Self>;
     #[cfg(not(feature = "std"))]
     type Locked = spin::Mutex<Self>;
 
-    fn root<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
+    fn root<T: Mark + ?Sized>(&mut self, ptr: NonNull<Object<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
+        <Object<T> as Pointee>::Metadata: UsizeMetadata,
     {
         let obj = AnyGcObject::new(ptr);
         if let Some(count) = self.roots.get_mut(&obj) {
@@ -182,9 +220,9 @@ impl GarbageCollector for DefaultGarbageCollector {
         }
     }
 
-    fn unroot<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
+    fn unroot<T: Mark + ?Sized>(&mut self, ptr: NonNull<Object<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
+        <Object<T> as Pointee>::Metadata: UsizeMetadata,
     {
         let obj = AnyGcObject::new(ptr);
         if let Some(count @ 2..) = self.roots.get_mut(&obj) {
@@ -194,18 +232,18 @@ impl GarbageCollector for DefaultGarbageCollector {
         }
     }
 
-    fn allocate<T: Mark + ?Sized>(
+    fn allocate<T: ?Sized>(
         &mut self,
-        metadata: <GcObject<T> as core::ptr::Pointee>::Metadata,
-    ) -> Result<NonNull<GcObject<T>>, AllocError> {
+        metadata: <Object<T> as core::ptr::Pointee>::Metadata,
+    ) -> Result<NonNull<Object<T>>, AllocError> {
         let layout = unsafe {
-            Layout::for_value_raw(core::ptr::from_raw_parts::<GcObject<T>>(null(), metadata))
+            Layout::for_value_raw(core::ptr::from_raw_parts::<Object<T>>(null(), metadata))
         };
 
         let gc_object = unsafe {
             let ptr = Global.allocate_zeroed(layout)?.cast::<()>();
 
-            core::ptr::from_raw_parts_mut::<GcObject<T>>(ptr.as_ptr(), metadata)
+            core::ptr::from_raw_parts_mut::<Object<T>>(ptr.as_ptr(), metadata)
                 .as_mut()
                 .unwrap()
         };
@@ -235,32 +273,38 @@ impl GarbageCollector for DefaultGarbageCollector {
         Ok(NonNull::from(gc_object))
     }
 
-    fn collect(&mut self) {
+    fn collect(&mut self) -> Result<(), GcError> {
+        if self.inhibitors.load(Ordering::SeqCst) > 0 {
+            return Err(GcError::Inhibited);
+        }
+
         self.mark_roots();
 
         self.sweep();
 
         self.unmark_all();
+
+        Ok(())
     }
 }
 
 pub trait GarbageCollector {
     type Locked: GcLock;
 
-    fn root<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
+    fn root<T: Mark + ?Sized>(&mut self, ptr: NonNull<Object<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: UsizeMetadata;
+        <Object<T> as Pointee>::Metadata: UsizeMetadata;
 
-    fn unroot<T: Mark + ?Sized>(&mut self, ptr: NonNull<GcObject<T>>)
+    fn unroot<T: Mark + ?Sized>(&mut self, ptr: NonNull<Object<T>>)
     where
-        <GcObject<T> as Pointee>::Metadata: UsizeMetadata;
+        <Object<T> as Pointee>::Metadata: UsizeMetadata;
 
-    fn allocate<T: Mark + ?Sized>(
+    fn allocate<T: ?Sized>(
         &mut self,
-        metadata: <GcObject<T> as core::ptr::Pointee>::Metadata,
-    ) -> Result<NonNull<GcObject<T>>, AllocError>;
+        metadata: <Object<T> as core::ptr::Pointee>::Metadata,
+    ) -> Result<NonNull<Object<T>>, AllocError>;
 
-    fn collect(&mut self);
+    fn collect(&mut self) -> Result<(), GcError>;
 }
 
 pub trait GcLock {
@@ -289,13 +333,13 @@ mod tests {
     use crate::{
         lock_default_gc,
         mark::Mark,
-        ptr::{Gc, GcRoot},
+        ptr::{Raw, Root},
         GarbageCollector,
     };
 
     #[test]
     fn test_gc() {
-        let r = GcRoot::<str>::from("Hello world!");
+        let r = Root::<str>::from("Hello world!");
 
         assert_eq!(r.len(), 12);
 
@@ -304,11 +348,11 @@ mod tests {
 
     #[test]
     fn test_weak() {
-        let r = GcRoot::<str>::from("Hello world!");
+        let r = Root::<str>::from("Hello world!");
 
         let weak = r.get_weak();
 
-        assert!(weak.present());
+        assert!(weak.is_present());
 
         assert_eq!(r.len(), 12);
         assert_eq!(weak.upgrade_and_then(|r| r.len()), Some(12));
@@ -319,9 +363,9 @@ mod tests {
             Some("Hello world!".to_string())
         );
 
-        lock_default_gc(|gc| gc.collect());
+        lock_default_gc(|gc| gc.collect().unwrap());
 
-        assert!(weak.present());
+        assert!(weak.is_present());
 
         assert_eq!(r.len(), 12);
         assert_eq!(weak.upgrade_and_then(|r| r.len()), Some(12));
@@ -334,9 +378,9 @@ mod tests {
 
         core::mem::drop(r);
 
-        lock_default_gc(|gc| gc.collect());
+        lock_default_gc(|gc| gc.collect().unwrap());
 
-        assert!(!weak.present());
+        assert!(!weak.is_present());
 
         assert!(weak.upgrade().is_none());
     }
@@ -344,7 +388,7 @@ mod tests {
     #[test]
     fn test_indirect() {
         struct Foo {
-            bar: Gc<str>,
+            bar: Raw<str>,
         }
 
         impl Mark for Foo {
@@ -353,10 +397,10 @@ mod tests {
             }
         }
 
-        let hello_world = GcRoot::<str>::from("Hello world!");
+        let hello_world = Root::<str>::from("Hello world!");
         let hw_weak = hello_world.get_weak();
 
-        assert!(hw_weak.present());
+        assert!(hw_weak.is_present());
 
         assert_eq!(hello_world.len(), 12);
         assert_eq!(hw_weak.upgrade_and_then(|r| r.len()), Some(12));
@@ -367,15 +411,15 @@ mod tests {
             Some("Hello world!".to_string())
         );
 
-        let foo = GcRoot::<Foo>::from(Foo {
+        let foo = Root::<Foo>::from(Foo {
             bar: unsafe { hello_world.as_unrooted() },
         });
 
         core::mem::drop(hello_world);
 
-        lock_default_gc(|gc| gc.collect());
+        lock_default_gc(|gc| gc.collect().unwrap());
 
-        assert!(hw_weak.present());
+        assert!(hw_weak.is_present());
 
         assert_eq!(foo.bar.len(), 12);
         assert_eq!(hw_weak.upgrade_and_then(|r| r.len()), Some(12));
@@ -388,9 +432,9 @@ mod tests {
 
         core::mem::drop(foo);
 
-        lock_default_gc(|gc| gc.collect());
+        lock_default_gc(|gc| gc.collect().unwrap());
 
-        assert!(!hw_weak.present());
+        assert!(!hw_weak.is_present());
         assert!(hw_weak.upgrade().is_none());
     }
 }

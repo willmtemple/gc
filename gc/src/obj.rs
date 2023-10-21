@@ -3,27 +3,29 @@ use core::{alloc::Layout, ptr::Pointee};
 use crate::mark::Mark;
 
 #[repr(C)]
-pub struct GcObject<T: Mark + ?Sized> {
+pub struct Object<T: ?Sized> {
     pub(crate) header: GcObjectHeader<T>,
     pub(crate) data: T,
 }
 
-impl<T: Mark + ?Sized> GcObject<T> {
+impl<T: Mark + ?Sized> Object<T> {
     pub(crate) fn mark(&mut self) {
         self.header.alloc_metadata.set_marked();
         self.data.mark();
     }
+}
 
+impl<T: ?Sized> Object<T> {
     pub fn downgrade(&self) -> &GcObjectHeader<T> {
         &self.header
     }
 }
 
 #[repr(C)]
-pub struct GcObjectHeader<T: Mark + ?Sized> {
+pub struct GcObjectHeader<T: ?Sized> {
     pub(crate) alloc_metadata: AllocMetadata,
     pub(crate) identity: GcObjectIdentity,
-    pub(crate) ptr_metadata: <GcObject<T> as Pointee>::Metadata,
+    pub(crate) ptr_metadata: <Object<T> as Pointee>::Metadata,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -36,9 +38,6 @@ pub struct GcObjectIdentity {
     pub instant: u64,
 }
 
-#[cfg(target_arch = "x86_64")]
-#[repr(transparent)]
-
 /// This struct packs the allocation metadata into a single `usize` for x86_64.
 /// We know the size cannot be larger than 48 bits, so we use the MSB to store
 /// the marked flag. The alignment must be a power of two, so we simply store
@@ -47,6 +46,8 @@ pub struct GcObjectIdentity {
 /// enough for anyone." The remaining 56 bits are used to store the size, and
 /// we even have 8 bits left for future use before we run into the 48 bits of
 /// size space.
+#[cfg(target_arch = "x86_64")]
+#[repr(transparent)]
 pub struct AllocMetadata(usize);
 
 #[cfg(target_arch = "x86_64")]
@@ -99,7 +100,7 @@ mod dynamic {
 
     use crate::mark::Mark;
 
-    use super::GcObject;
+    use super::Object;
 
     #[derive(Eq, PartialEq)]
     pub struct GcObjectImpl {
@@ -170,18 +171,18 @@ mod dynamic {
     }
 
     impl AnyGcObject {
-        pub fn new<T: Mark + ?Sized>(ptr: NonNull<GcObject<T>>) -> Self
+        pub fn new<T: Mark + ?Sized>(ptr: NonNull<Object<T>>) -> Self
         where
-            <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
+            <Object<T> as Pointee>::Metadata: UsizeMetadata,
         {
             Self {
                 data: GcObjectPtr(ptr.cast()),
                 size: core::ptr::metadata(ptr.as_ptr()).to_usize(),
                 vtable: &GcObjectImpl {
                     mark: |data, size| unsafe {
-                        let o = core::ptr::from_raw_parts_mut::<GcObject<T>>(
+                        let o = core::ptr::from_raw_parts_mut::<Object<T>>(
                             data.as_ptr(),
-                            <GcObject<T> as Pointee>::Metadata::from_usize(size),
+                            <Object<T> as Pointee>::Metadata::from_usize(size),
                         )
                         .as_mut()
                         .unwrap();
