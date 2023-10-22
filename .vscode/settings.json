@@ -1,5 +1,5 @@
 {
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.checkOnSave": true,
-  "cSpell.words": ["Hamt", "Pointee"]
+  "cSpell.words": ["Hamt", "Pointee", "repr"]
 }
