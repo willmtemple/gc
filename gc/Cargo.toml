@@ -11,8 +11,11 @@ std = ["dep:lazy_static", "rand/std", "rand/std_rng"]
 
 [dependencies]
 spin = "0.9"
-lazy_static = { version = "1", optional = true}
-rand = { version = "0.8", default-features = false, features = ["alloc", "getrandom"] }
+lazy_static = { version = "1", optional = true }
+rand = { version = "0.8", default-features = false, features = [
+    "alloc",
+    "getrandom",
+] }
 derive = { path = "../derive/" }
 
 [profile.release]
@@ -21,5 +24,3 @@ opt-level = "s"
 # strip = true
 panic = "abort"
 codegen-units = 1
-
-

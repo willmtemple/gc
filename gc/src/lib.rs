@@ -28,11 +28,24 @@ pub mod ptr;
 pub mod hamt;
 
 #[cfg(not(feature = "std"))]
-pub fn lock_default_gc<R, F: FnOnce(&mut DefaultGarbageCollector) -> R>(f: F) -> R {
+mod _gc {
+    use core::ops::DerefMut;
+
+    use crate::DefaultGarbageCollector;
+
     static GC: spin::Mutex<DefaultGarbageCollector> =
         spin::Mutex::new(DefaultGarbageCollector::new());
 
-    f(GC.lock().deref_mut())
+    pub fn lock_default_gc<R, F: FnOnce(&mut DefaultGarbageCollector) -> R>(f: F) -> R {
+        f(GC.lock().deref_mut())
+    }
+
+    pub fn inhibit_collections<R>(f: impl FnOnce() -> R) -> R {
+        GC.lock().inhibit();
+        let r = f();
+        GC.lock().uninhibit();
+        r
+    }
 }
 
 #[cfg(feature = "std")]
@@ -91,7 +104,6 @@ impl Allocation {
     }
 }
 
-#[derive(Default)]
 pub struct DefaultGarbageCollector {
     #[cfg(feature = "std")]
     roots: std::collections::HashMap<AnyGcObject, usize>,
@@ -106,6 +118,12 @@ pub struct DefaultGarbageCollector {
     seq: u64,
 
     inhibitors: AtomicUsize,
+}
+
+impl Default for DefaultGarbageCollector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DefaultGarbageCollector {

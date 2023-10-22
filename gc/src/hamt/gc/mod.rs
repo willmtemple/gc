@@ -121,35 +121,6 @@ impl<K: Eq + Hash + Mark, V: Mark, HamtHasher: Hasher + Default> Clone for Hamt<
     }
 }
 
-// enum HamtIterator<
-//     'it,
-//     K: 'it,
-//     V: 'it,
-//     LeafIter: Iterator<Item = (&'it K, &'it V)>,
-//     InnerIter: Iterator<Item = (&'it K, &'it V)>,
-// > {
-//     Leaf(LeafIter),
-//     Inner(InnerIter),
-//     Empty,
-// }
-
-// impl<'it, K: 'it, V: 'it, LeafIter, InnerIter> Iterator
-//     for HamtIterator<'it, K, V, LeafIter, InnerIter>
-// where
-//     LeafIter: Iterator<Item = (&'it K, &'it V)>,
-//     InnerIter: Iterator<Item = (&'it K, &'it V)>,
-// {
-//     type Item = (&'it K, &'it V);
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         match self {
-//             HamtIterator::Leaf(l) => l.next(),
-//             HamtIterator::Inner(i) => i.next(),
-//             HamtIterator::Empty => None,
-//         }
-//     }
-// }
-
 impl<K: Eq + Hash + Mark, V: Mark, HamtHasher: Hasher + Default> Hamt<K, V, HamtHasher> {
     pub fn new() -> Self {
         Self {
