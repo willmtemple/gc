@@ -68,14 +68,14 @@ pub enum NodeType {
 
 impl NodeType {
     fn from_u8(n: u8) -> Self {
-        debug_assert_eq!(0b111 & n, n);
+        debug_assert_eq!(0b11 & n, n);
 
         match n {
             0 => Self::_Header,
             1 => Self::Leaf,
             2 => Self::Interior,
             3 => Self::Collision,
-            _ => panic!("Unknown node type 0b{:03b}", n),
+            _ => panic!("Unknown node type 0b{:02b}", n),
         }
     }
 }
@@ -99,8 +99,8 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Clone for NodeHeader<K, V, Confi
 
 #[cfg(target_pointer_width = "64")]
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
-    const TAG_MASK: usize = 0b111 << 61;
-    const LEVEL_MASK: usize = 0b1111 << 57;
+    const TAG_MASK: usize = 0b11 << 62;
+    const LEVEL_MASK: usize = 0b1111 << 58;
     const SIZE_MASK: usize = !(Self::TAG_MASK | Self::LEVEL_MASK);
 
     pub(crate) unsafe fn new<T: HamtNode<K, V, Config> + ?Sized>(
@@ -113,17 +113,17 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
 
         Self {
             _ph: PhantomData,
-            packed: ((T::TAG as usize) << 61) | ((level & 0b1111) << 57) | (size & !Self::TAG_MASK),
+            packed: ((T::TAG as usize) << 62) | ((level & 0b1111) << 58) | (size & !Self::TAG_MASK),
             hash,
         }
     }
 
     fn tag(&self) -> NodeType {
-        NodeType::from_u8(((self.packed & Self::TAG_MASK) >> 61) as u8)
+        NodeType::from_u8(((self.packed & Self::TAG_MASK) >> 62) as u8)
     }
 
     pub(crate) fn level(&self) -> usize {
-        (self.packed & Self::LEVEL_MASK) >> 57
+        (self.packed & Self::LEVEL_MASK) >> 58
     }
 
     fn size(&self) -> usize {
