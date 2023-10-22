@@ -8,13 +8,13 @@ use crate::hamt::config::Kvp;
 use super::{
     config::{DefaultGlobal, HamtConfig},
     iter::HamtIterator,
-    node::{util::HashCode, Collision, NodeHeader},
+    node::{util::HashCode, Collision},
 };
 
 #[derive(Default)]
 pub struct HamtVec<V, Config: HamtConfig<(), V> = DefaultGlobal> {
     size: usize,
-    root: Option<Config::Pointer<NodeHeader<(), V, Config>>>,
+    root: Option<Config::NodeStore>,
 }
 
 impl<V, Config: HamtConfig<(), V>> HamtVec<V, Config> {
@@ -131,7 +131,7 @@ impl<V, Config: HamtConfig<(), V>> HamtVec<V, Config> {
             V: core::fmt::Debug,
             Alloc: HamtConfig<K, V>,
         >(
-            node: &Alloc::Pointer<NodeHeader<K, V, Alloc>>,
+            node: &Alloc::NodeStore,
             level: usize,
         ) {
             let spaces = " ".repeat(level * 2);

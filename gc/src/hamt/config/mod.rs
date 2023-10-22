@@ -24,13 +24,13 @@ pub type DefaultGlobal = ArcGlobal;
 /// etc.
 pub unsafe trait HamtConfig<K: Eq + Hash, V>: Copy {
     /// The type of a pointer to a HAMT node.
-    type Pointer<T: HamtNode<K, V, Self> + ?Sized>: Clone + Deref<Target = T>;
+    type NodeStore: Clone + Deref<Target = NodeHeader<K, V, Self>>;
 
     // The type of a key-value pair stored in the HAMT.
-    type WrappedKvp: Kvp<K, V>;
+    type Kvp: Kvp<K, V>;
 
     /// Wraps a key-value pair.
-    fn wrap_kvp(k: K, v: V) -> Self::WrappedKvp;
+    fn wrap_kvp(k: K, v: V) -> Self::Kvp;
 
     /// Allocate a region of memory for a node of type `T` with the given `metadata`.
     ///
@@ -44,16 +44,16 @@ pub unsafe trait HamtConfig<K: Eq + Hash, V>: Copy {
     fn allocate<T: HamtNode<K, V, Self> + ?Sized>(
         metadata: <T as Pointee>::Metadata,
         f: impl FnOnce(&mut T),
-    ) -> Self::Pointer<T>;
+    ) -> Self::NodeStore;
 
-    /// Downgrade a pointer to a HAMT node into a pointer to a Node header.
-    ///
-    /// # Safety
-    ///
-    /// This amounts to transmutation.
-    unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
-        ptr: Self::Pointer<T>,
-    ) -> Self::Pointer<NodeHeader<K, V, Self>>;
+    // /// Downgrade a pointer to a HAMT node into a pointer to a Node header.
+    // ///
+    // /// # Safety
+    // ///
+    // /// This amounts to transmutation.
+    // unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
+    //     ptr: Self::NodeStore<T>,
+    // ) -> Self::NodeStore<NodeHeader<K, V, Self>>;
 
     /// Reinterpret a ref to a HAMT node into a pointer to a Node header and convert it to a Ptr.
     ///
@@ -61,7 +61,10 @@ pub unsafe trait HamtConfig<K: Eq + Hash, V>: Copy {
     ///
     /// This amounts to transmutation. This function yields undefined behavior if the underlying ref
     /// was not taken from a pointer that was obtained by calling `deref` on the result of `downgrade_ptr`.
+    ///
+    /// This should return a NEW pointer. In case of refcounting or other memory management schemes, treat
+    /// this as if it creates a NEW, ADDITIONAL pointer.
     unsafe fn ptr_from_ref_reinterpret<T: HamtNode<K, V, Self> + ?Sized>(
         ptr: &T,
-    ) -> Self::Pointer<NodeHeader<K, V, Self>>;
+    ) -> Self::NodeStore;
 }

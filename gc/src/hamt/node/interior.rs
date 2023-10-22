@@ -19,7 +19,7 @@ use core::ptr::write;
 pub struct InnerNode<K: Eq + Hash, V, Config: HamtConfig<K, V>> {
     pub(crate) _header: NodeHeader<K, V, Config>,
     pub(crate) bitmap: Bitmap,
-    pub(crate) children: [Config::Pointer<NodeHeader<K, V, Config>>],
+    pub(crate) children: [Config::NodeStore],
 }
 
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
@@ -31,7 +31,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
         self._header.hash
     }
 
-    pub fn get(&self, k: &K, hash: HashCode) -> Option<&Config::WrappedKvp> {
+    pub fn get(&self, k: &K, hash: HashCode) -> Option<&Config::Kvp> {
         debug_assert!(self.level() <= MAX_LEVEL);
         // eprintln!(
         //     "Seeking hash {:#066b} in inner node at level {}",
@@ -51,12 +51,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
         }
     }
 
-    pub fn insert(
-        &self,
-        key: K,
-        value: V,
-        hash: HashCode,
-    ) -> Config::Pointer<NodeHeader<K, V, Config>> {
+    pub fn insert(&self, key: K, value: V, hash: HashCode) -> Config::NodeStore {
         debug_assert!(self.level() <= MAX_LEVEL);
 
         let leading_same_bits = (self.hash() ^ hash).leading_zeros();
@@ -86,35 +81,31 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
             let self_bits_for_next_level = hash_bits_for_level(self.hash(), regression_level);
             let bitmap = (1 << new_bits_for_next_level) | (1 << self_bits_for_next_level);
 
-            let new_inner = unsafe {
-                Config::allocate::<Self>(2, |inner| {
-                    write(
-                        &mut inner._header,
-                        NodeHeader::new::<Self>(regression_level, 2, hash),
-                    );
+            return Config::allocate::<Self>(2, |inner| unsafe {
+                write(
+                    &mut inner._header,
+                    NodeHeader::new::<Self>(regression_level, 2, hash),
+                );
 
-                    inner.bitmap = bitmap;
+                inner.bitmap = bitmap;
 
-                    inner.bitmap = bitmap;
+                inner.bitmap = bitmap;
 
-                    let new_node = Collision::<K, V, Config>::create_with_pair(key, value, hash);
-                    let this_node = Config::ptr_from_ref_reinterpret(self);
+                let new_node = Collision::<K, V, Config>::create_with_pair(key, value, hash);
+                let this_node = Config::ptr_from_ref_reinterpret(self);
 
-                    match new_bits_for_next_level.cmp(&self_bits_for_next_level) {
-                        Ordering::Less => {
-                            write(&mut inner.children[0], new_node);
-                            write(&mut inner.children[1], this_node);
-                        }
-                        Ordering::Greater => {
-                            write(&mut inner.children[0], this_node);
-                            write(&mut inner.children[1], new_node);
-                        }
-                        Ordering::Equal => unreachable!(),
+                match new_bits_for_next_level.cmp(&self_bits_for_next_level) {
+                    Ordering::Less => {
+                        write(&mut inner.children[0], new_node);
+                        write(&mut inner.children[1], this_node);
                     }
-                })
-            };
-
-            return unsafe { Config::downgrade_ptr(new_inner) };
+                    Ordering::Greater => {
+                        write(&mut inner.children[0], this_node);
+                        write(&mut inner.children[1], new_node);
+                    }
+                    Ordering::Equal => unreachable!(),
+                }
+            });
         }
 
         let index = hash_bits_for_level(hash, self.level());
@@ -139,7 +130,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
         hash: HashCode,
         index: u64,
         pop: usize,
-    ) -> Config::Pointer<NodeHeader<K, V, Config>> {
+    ) -> Config::NodeStore {
         // Allocate a new InnerNode with a new bitmap with the `index`th bit set,
         // and with a new single-value leaf node allocated with (k, v) at index `pop`.
 
@@ -149,68 +140,50 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
         let new_bitmap = self.bitmap | (1 << index);
         // eprintln!("Bitmap next: {:#066b}, from index {}", new_bitmap, index);
 
-        let new_inner = unsafe {
-            Config::allocate::<Self>(self.children.len() + 1, move |inner| {
-                write(
-                    &mut inner._header,
-                    NodeHeader::new::<Self>(self.level(), self.children.len() + 1, hash),
-                );
-                inner.bitmap = new_bitmap;
+        Config::allocate::<Self>(self.children.len() + 1, move |inner| unsafe {
+            write(
+                &mut inner._header,
+                NodeHeader::new::<Self>(self.level(), self.children.len() + 1, hash),
+            );
+            inner.bitmap = new_bitmap;
 
-                for i in 0..self.children.len() + 1 {
-                    match i.cmp(&pop) {
-                        Ordering::Less => {
-                            write(&mut inner.children[i], self.children[i].clone());
-                        }
-                        Ordering::Greater => {
-                            write(&mut inner.children[i], self.children[i - 1].clone());
-                        }
-                        Ordering::Equal => {}
+            for i in 0..self.children.len() + 1 {
+                match i.cmp(&pop) {
+                    Ordering::Less => {
+                        write(&mut inner.children[i], self.children[i].clone());
                     }
+                    Ordering::Greater => {
+                        write(&mut inner.children[i], self.children[i - 1].clone());
+                    }
+                    Ordering::Equal => {}
                 }
+            }
 
-                // We do this at the end to avoid requiring new_leaf to be copy.
-                write(&mut inner.children[pop], new_leaf);
-            })
-        };
-
-        unsafe { Config::downgrade_ptr(new_inner) }
+            // We do this at the end to avoid requiring new_leaf to be copy.
+            write(&mut inner.children[pop], new_leaf);
+        })
     }
 
-    fn insert_occupied(
-        &self,
-        key: K,
-        value: V,
-        hash: HashCode,
-        pop: usize,
-    ) -> Config::Pointer<NodeHeader<K, V, Config>> {
+    fn insert_occupied(&self, key: K, value: V, hash: HashCode, pop: usize) -> Config::NodeStore {
         // Allocate a new InnerNode with the `pop`th child replaced by the result
         // of inserting k, v into the child.
         let new_child = self.children[pop].insert(key, value, hash);
 
-        let new_inner = unsafe {
-            Config::allocate::<Self>(self.children.len(), |inner| {
-                write(&mut inner._header, self._header.clone());
-                inner.bitmap = self.bitmap;
-                for (i, child) in self.children.iter().enumerate() {
-                    if i.cmp(&pop) != Ordering::Equal {
-                        write(&mut inner.children[i], child.clone());
-                    }
+        Config::allocate::<Self>(self.children.len(), |inner| unsafe {
+            write(&mut inner._header, self._header.clone());
+            inner.bitmap = self.bitmap;
+            for (i, child) in self.children.iter().enumerate() {
+                if i.cmp(&pop) != Ordering::Equal {
+                    write(&mut inner.children[i], child.clone());
                 }
+            }
 
-                // We do this at the end to avoid requiring new_child to be copy.
-                write(&mut inner.children[pop], new_child);
-            })
-        };
-
-        unsafe { Config::downgrade_ptr(new_inner) }
+            // We do this at the end to avoid requiring new_child to be copy.
+            write(&mut inner.children[pop], new_child);
+        })
     }
 
-    pub fn remove(
-        &self,
-        key: &K,
-        hash: HashCode,
-    ) -> Option<Config::Pointer<NodeHeader<K, V, Config>>> {
+    pub fn remove(&self, key: &K, hash: HashCode) -> Option<Config::NodeStore> {
         debug_assert!(self.level() <= MAX_LEVEL);
 
         let index = hash_bits_for_level(hash, self.level());
@@ -237,8 +210,9 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
 
             // The child was modified. We have a new pointer that we want to replace our current pointer with, but the
             // bitmap is unnafected.
-            let new_inner = unsafe {
-                Config::allocate::<Self>(self.children.len(), |inner| {
+            Some(Config::allocate::<Self>(
+                self.children.len(),
+                |inner| unsafe {
                     write(&mut inner._header, self._header.clone());
                     inner.bitmap = self.bitmap;
 
@@ -252,10 +226,8 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
 
                     // We do this at the end to avoid requiring next to be copy.
                     write(&mut inner.children[pop], next);
-                })
-            };
-
-            Some(unsafe { Config::downgrade_ptr(new_inner) })
+                },
+            ))
         } else {
             // The child was removed.
 
@@ -269,39 +241,26 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
             } else {
                 let new_bitmap = self.bitmap & !(1 << index);
 
-                let new_inner = unsafe {
-                    Config::allocate::<Self>(new_len, |inner| {
-                        write(
-                            &mut inner._header,
-                            NodeHeader::new::<Self>(self.level(), new_len, self._header.hash),
-                        );
-                        inner.bitmap = new_bitmap;
-                        for i in 0..new_len {
-                            match i.cmp(&pop) {
-                                Ordering::Less => {
-                                    write(&mut inner.children[i], self.children[i].clone());
-                                }
-                                Ordering::Greater | Ordering::Equal => {
-                                    write(&mut inner.children[i], self.children[i + 1].clone());
-                                }
+                Some(Config::allocate::<Self>(new_len, |inner| unsafe {
+                    write(
+                        &mut inner._header,
+                        NodeHeader::new::<Self>(self.level(), new_len, self._header.hash),
+                    );
+                    inner.bitmap = new_bitmap;
+                    for i in 0..new_len {
+                        match i.cmp(&pop) {
+                            Ordering::Less => {
+                                write(&mut inner.children[i], self.children[i].clone());
+                            }
+                            Ordering::Greater | Ordering::Equal => {
+                                write(&mut inner.children[i], self.children[i + 1].clone());
                             }
                         }
-                    })
-                };
-
-                Some(unsafe { Config::downgrade_ptr(new_inner) })
+                    }
+                }))
             }
         }
     }
-
-    // fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
-    //     self.children
-    //         .iter()
-    //         .flat_map(|child| match child.deref().upgrade() {
-    //             NodePtr::Leaf(leaf) => HamtIterator::Leaf(leaf.iter()),
-    //             NodePtr::Inner(node) => HamtIterator::Inner(node.iter()),
-    //         })
-    // }
 }
 
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtNode<K, V, Config> for InnerNode<K, V, Config> {

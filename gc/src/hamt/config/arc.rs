@@ -14,18 +14,18 @@ use super::HamtConfig;
 pub struct ArcGlobal;
 
 unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for ArcGlobal {
-    type Pointer<T: HamtNode<K, V, Self> + ?Sized> = Arc<T>;
+    type NodeStore = Arc<NodeHeader<K, V, Self>>;
 
-    type WrappedKvp = Arc<(K, V)>;
+    type Kvp = Arc<(K, V)>;
 
-    fn wrap_kvp(k: K, v: V) -> Self::WrappedKvp {
+    fn wrap_kvp(k: K, v: V) -> Self::Kvp {
         Arc::new((k, v))
     }
 
     fn allocate<T: HamtNode<K, V, Self> + ?Sized>(
         metadata: <T as Pointee>::Metadata,
         init: impl FnOnce(&mut T),
-    ) -> Self::Pointer<T> {
+    ) -> Self::NodeStore {
         let layout =
             unsafe { Layout::for_value_raw(core::ptr::from_raw_parts::<T>(null(), metadata)) };
 
@@ -62,22 +62,22 @@ unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for ArcGlobal {
 
         init(unsafe { &mut *data });
 
-        unsafe { Arc::from_raw(data) }
+        unsafe { Arc::from_raw((*data).header()) }
     }
 
-    unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
-        ptr: Self::Pointer<T>,
-    ) -> Self::Pointer<NodeHeader<K, V, Self>> {
-        unsafe {
-            let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
-            Arc::increment_strong_count(raw);
-            Arc::from_raw(raw)
-        }
-    }
+    // unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
+    //     ptr: Self::NodeStore<T>,
+    // ) -> Self::NodeStore<NodeHeader<K, V, Self>> {
+    //     unsafe {
+    //         let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
+    //         Arc::increment_strong_count(raw);
+    //         Arc::from_raw(raw)
+    //     }
+    // }
 
     unsafe fn ptr_from_ref_reinterpret<T: HamtNode<K, V, Self> + ?Sized>(
         ptr: &T,
-    ) -> Self::Pointer<NodeHeader<K, V, Self>> {
+    ) -> Self::NodeStore {
         unsafe {
             let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
             Arc::increment_strong_count(raw);

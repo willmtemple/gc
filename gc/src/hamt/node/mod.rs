@@ -130,21 +130,21 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
         self.packed & Self::SIZE_MASK
     }
 
-    pub fn get(&self, k: &K, hash: HashCode) -> Option<&Config::WrappedKvp> {
+    pub fn get(&self, k: &K, hash: HashCode) -> Option<&Config::Kvp> {
         match self.upgrade() {
             NodePtr::Collision(node) => node.get(k, hash),
             NodePtr::Inner(node) => node.get(k, hash),
         }
     }
 
-    pub fn insert(&self, k: K, v: V, hash: HashCode) -> Config::Pointer<Self> {
+    pub fn insert(&self, k: K, v: V, hash: HashCode) -> Config::NodeStore {
         match self.upgrade() {
             NodePtr::Collision(node) => node.insert(k, v, hash),
             NodePtr::Inner(node) => node.insert(k, v, hash),
         }
     }
 
-    pub fn remove(&self, k: &K, hash: HashCode) -> Option<Config::Pointer<Self>> {
+    pub fn remove(&self, k: &K, hash: HashCode) -> Option<Config::NodeStore> {
         match self.upgrade() {
             NodePtr::Collision(node) => node.remove(k, hash),
             NodePtr::Inner(node) => node.remove(k, hash),

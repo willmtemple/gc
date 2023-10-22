@@ -17,7 +17,7 @@ pub struct Collision<K: Eq + Hash, V, Config: HamtConfig<K, V>> {
     pub(crate) _header: NodeHeader<K, V, Config>,
     _ph: PhantomData<Config>,
     // path: Path,
-    pub(crate) values: [Config::WrappedKvp],
+    pub(crate) values: [Config::Kvp],
 }
 
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
@@ -25,7 +25,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
         self._header.hash
     }
 
-    pub fn get(&self, key: &K, hash: HashCode) -> Option<&Config::WrappedKvp> {
+    pub fn get(&self, key: &K, hash: HashCode) -> Option<&Config::Kvp> {
         if hash != self.hash() {
             None
         } else {
@@ -33,21 +33,11 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
         }
     }
 
-    pub fn insert(
-        &self,
-        key: K,
-        value: V,
-        hash: HashCode,
-    ) -> Config::Pointer<NodeHeader<K, V, Config>> {
-        // debug_assert!(path.level == self.path.level);
+    pub fn insert(&self, key: K, value: V, hash: HashCode) -> Config::NodeStore {
         // eprintln!(
         //     "Inserting hash {:#066b} into collision node with hash {:#066b}",
         //     hash,
         //     self.hash()
-        // );
-        // debug_assert_eq!(
-        //     hash_bits_for_level(hash, path.level),
-        //     hash_bits_for_level(self.hash, path.level)
         // );
 
         let leading_same_bits = (hash ^ self.hash()).leading_zeros();
@@ -78,45 +68,32 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
 
             debug_assert!(next_level < MAX_LEVEL);
 
-            let new_inner = unsafe {
-                Config::allocate::<InnerNode<K, V, Config>>(2, move |inner| {
-                    write(
-                        &mut inner._header,
-                        NodeHeader::new::<InnerNode<K, V, Config>>(next_level, 2, hash),
-                    );
-                    inner.bitmap = bitmap;
+            Config::allocate::<InnerNode<K, V, Config>>(2, move |inner| unsafe {
+                write(
+                    &mut inner._header,
+                    NodeHeader::new::<InnerNode<K, V, Config>>(next_level, 2, hash),
+                );
+                inner.bitmap = bitmap;
 
-                    let new_node = Self::create_with_pair(key, value, hash);
-                    let this_collision = Config::ptr_from_ref_reinterpret(self);
+                let new_node = Self::create_with_pair(key, value, hash);
+                let this_collision = Config::ptr_from_ref_reinterpret(self);
 
-                    match new_bits_for_next_level.cmp(&self_bits_for_next_level) {
-                        Ordering::Less => {
-                            write(&mut inner.children[0], new_node);
-                            write(&mut inner.children[1], this_collision);
-                        }
-                        Ordering::Greater => {
-                            write(&mut inner.children[0], this_collision);
-                            write(&mut inner.children[1], new_node);
-                        }
-                        Ordering::Equal => unreachable!(),
+                match new_bits_for_next_level.cmp(&self_bits_for_next_level) {
+                    Ordering::Less => {
+                        write(&mut inner.children[0], new_node);
+                        write(&mut inner.children[1], this_collision);
                     }
-                })
-            };
-
-            unsafe { Config::downgrade_ptr(new_inner) }
+                    Ordering::Greater => {
+                        write(&mut inner.children[0], this_collision);
+                        write(&mut inner.children[1], new_node);
+                    }
+                    Ordering::Equal => unreachable!(),
+                }
+            })
         }
     }
 
-    pub fn remove(
-        &self,
-        key: &K,
-        hash: HashCode,
-    ) -> Option<Config::Pointer<NodeHeader<K, V, Config>>> {
-        // debug_assert_eq!(
-        //     hash_bits_for_level(path.hash, path.level),
-        //     hash_bits_for_level(self.hash, path.level)
-        // );
-
+    pub fn remove(&self, key: &K, hash: HashCode) -> Option<Config::NodeStore> {
         if hash != self.hash() {
             // The key is not in the map.
             return Some(unsafe { Config::ptr_from_ref_reinterpret(self) });
@@ -135,8 +112,10 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
             } else {
                 // The key is in the collision node, but there are other keys. We can remove the key from the collision
                 // node.
-                let new_collision = unsafe {
-                    Config::allocate::<Self>(self.values.len() - 1, |collision| {
+
+                Some(Config::allocate::<Self>(
+                    self.values.len() - 1,
+                    |collision| unsafe {
                         write(
                             &mut collision._header,
                             NodeHeader::new::<Self>(MAX_LEVEL, self.values.len() - 1, hash),
@@ -146,10 +125,8 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
                                 write(&mut collision.values[i], self.values[i].clone());
                             }
                         }
-                    })
-                };
-
-                Some(unsafe { Config::downgrade_ptr(new_collision) })
+                    },
+                ))
             }
         } else {
             // The key is not in the collision node.
@@ -157,40 +134,32 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
         }
     }
 
-    pub fn create_with_pair(
-        key: K,
-        value: V,
-        hash: HashCode,
-    ) -> Config::Pointer<NodeHeader<K, V, Config>> {
-        unsafe {
-            Config::downgrade_ptr({
-                Config::allocate::<Collision<K, V, Config>>(1, |collision| {
-                    write(
-                        &mut collision._header,
-                        NodeHeader::new::<Self>(MAX_LEVEL, 1, hash),
-                    );
+    pub fn create_with_pair(key: K, value: V, hash: HashCode) -> Config::NodeStore {
+        Config::allocate::<Collision<K, V, Config>>(1, |collision| unsafe {
+            write(
+                &mut collision._header,
+                NodeHeader::new::<Self>(MAX_LEVEL, 1, hash),
+            );
 
-                    debug_assert!(
-                        (&collision.values[..] as *const _ as *const () as usize)
-                            % core::mem::align_of::<Config::WrappedKvp>()
-                            == 0
-                    );
+            debug_assert!(
+                (&collision.values[..] as *const _ as *const () as usize)
+                    % core::mem::align_of::<Config::Kvp>()
+                    == 0
+            );
 
-                    let kvp = Config::wrap_kvp(key, value);
+            let kvp = Config::wrap_kvp(key, value);
 
-                    debug_assert!(
-                        (&collision.values[0] as *const _ as *const () as usize)
-                            % core::mem::align_of::<Config::WrappedKvp>()
-                            == 0
-                    );
+            debug_assert!(
+                (&collision.values[0] as *const _ as *const () as usize)
+                    % core::mem::align_of::<Config::Kvp>()
+                    == 0
+            );
 
-                    write(&mut collision.values[0], kvp);
-                })
-            })
-        }
+            write(&mut collision.values[0], kvp);
+        })
     }
 
-    fn add_pair(&self, key: K, value: V) -> Config::Pointer<NodeHeader<K, V, Config>> {
+    fn add_pair(&self, key: K, value: V) -> Config::NodeStore {
         let cur_value = self
             .values
             .iter()
@@ -198,41 +167,34 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
             .find(|(_, kvp)| kvp.key() == &key);
 
         if let Some((idx, _)) = cur_value {
-            unsafe {
-                Config::downgrade_ptr(Config::allocate::<Self>(
-                    self.values.len(),
-                    move |collision| {
-                        write(&mut collision._header, self._header.clone());
-                        for i in 0..self.values.len() {
-                            if i != idx {
-                                write(&mut collision.values[i], self.values[i].clone());
-                            }
-                        }
+            Config::allocate::<Self>(self.values.len(), move |collision| unsafe {
+                write(&mut collision._header, self._header.clone());
+                for i in 0..self.values.len() {
+                    if i != idx {
+                        write(&mut collision.values[i], self.values[i].clone());
+                    }
+                }
 
-                        write(&mut collision.values[idx], Config::wrap_kvp(key, value));
-                    },
-                ))
-            }
+                write(&mut collision.values[idx], Config::wrap_kvp(key, value));
+            })
         } else {
             let next_len = self.values.len() + 1;
 
             assert!(next_len <= NodeHeader::<K, V, Config>::SIZE_MASK);
 
-            unsafe {
-                Config::downgrade_ptr(Config::allocate::<Self>(self.values.len() + 1, |leaf| {
-                    write(
-                        &mut leaf._header,
-                        NodeHeader::new::<Self>(MAX_LEVEL, self.values.len() + 1, self.hash()),
-                    );
-                    for i in 0..self.values.len() {
-                        write(&mut leaf.values[i], self.values[i].clone());
-                    }
-                    write(
-                        &mut leaf.values[self.values.len()],
-                        Config::wrap_kvp(key, value),
-                    );
-                }))
-            }
+            Config::allocate::<Self>(self.values.len() + 1, |leaf| unsafe {
+                write(
+                    &mut leaf._header,
+                    NodeHeader::new::<Self>(MAX_LEVEL, self.values.len() + 1, self.hash()),
+                );
+                for i in 0..self.values.len() {
+                    write(&mut leaf.values[i], self.values[i].clone());
+                }
+                write(
+                    &mut leaf.values[self.values.len()],
+                    Config::wrap_kvp(key, value),
+                );
+            })
         }
     }
 }

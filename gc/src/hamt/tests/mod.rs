@@ -1,6 +1,6 @@
 use crate::hamt::{
     config::{CloneKvpArcGlobal, DefaultGlobal, HamtConfig},
-    node::{util::MAX_LEVEL, Collision, InnerNode, NodeHeader},
+    node::{util::MAX_LEVEL, Collision, HamtNode, InnerNode, NodeHeader},
 };
 
 use super::HamtVec;
@@ -142,7 +142,7 @@ fn check_align() {
     });
 
     let node_ptr = data.as_ref() as *const _ as *const ();
-    let node_header_ptr = &data._header as *const _ as *const ();
+    let node_header_ptr = data.header() as *const _ as *const ();
 
     assert_eq!(node_ptr as usize, node_header_ptr as usize);
 
@@ -156,7 +156,7 @@ fn check_align() {
     });
 
     let node_ptr = data.as_ref() as *const _ as *const ();
-    let node_header_ptr = &data._header as *const _ as *const ();
+    let node_header_ptr = data.header() as *const _ as *const ();
 
     assert_eq!(node_ptr as usize, node_header_ptr as usize);
 }

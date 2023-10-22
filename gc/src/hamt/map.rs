@@ -19,7 +19,7 @@ pub struct HamtMap<
     Config: HamtConfig<K, V> = DefaultGlobal,
 > {
     _ph: PhantomData<(K, V, Config, HamtHasher)>,
-    root: Option<Config::Pointer<NodeHeader<K, V, Config>>>,
+    root: Option<Config::NodeStore>,
 }
 
 impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>> Default
@@ -152,7 +152,7 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
             V: core::fmt::Debug,
             Config: HamtConfig<K, V>,
         >(
-            node: &Config::Pointer<NodeHeader<K, V, Config>>,
+            node: &Config::NodeStore,
             level: usize,
         ) {
             use core::ops::Deref;

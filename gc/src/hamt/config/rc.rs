@@ -14,18 +14,18 @@ use super::HamtConfig;
 pub struct RcGlobal;
 
 unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for RcGlobal {
-    type Pointer<T: HamtNode<K, V, Self> + ?Sized> = Rc<T>;
+    type NodeStore = Rc<NodeHeader<K, V, Self>>;
 
-    type WrappedKvp = Rc<(K, V)>;
+    type Kvp = Rc<(K, V)>;
 
-    fn wrap_kvp(k: K, v: V) -> Self::WrappedKvp {
+    fn wrap_kvp(k: K, v: V) -> Self::Kvp {
         Rc::new((k, v))
     }
 
     fn allocate<T: HamtNode<K, V, Self> + ?Sized>(
         metadata: <T as Pointee>::Metadata,
         init: impl FnOnce(&mut T),
-    ) -> Self::Pointer<T> {
+    ) -> Self::NodeStore {
         let layout =
             unsafe { Layout::for_value_raw(core::ptr::from_raw_parts::<T>(null(), metadata)) };
 
@@ -62,22 +62,22 @@ unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for RcGlobal {
 
         init(unsafe { &mut *data });
 
-        unsafe { Rc::from_raw(data) }
+        unsafe { Rc::from_raw((*data).header()) }
     }
 
-    unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
-        ptr: Self::Pointer<T>,
-    ) -> Self::Pointer<NodeHeader<K, V, Self>> {
-        unsafe {
-            let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
-            Rc::increment_strong_count(raw);
-            Rc::from_raw(raw)
-        }
-    }
+    // unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
+    //     ptr: Self::NodeStore<T>,
+    // ) -> Self::NodeStore<NodeHeader<K, V, Self>> {
+    //     unsafe {
+    //         let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
+    //         Rc::increment_strong_count(raw);
+    //         Rc::from_raw(raw)
+    //     }
+    // }
 
     unsafe fn ptr_from_ref_reinterpret<T: HamtNode<K, V, Self> + ?Sized>(
         ptr: &T,
-    ) -> Self::Pointer<NodeHeader<K, V, Self>> {
+    ) -> Self::NodeStore {
         unsafe {
             let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
             Rc::increment_strong_count(raw);

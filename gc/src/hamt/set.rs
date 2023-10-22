@@ -5,7 +5,7 @@ use core::{
 
 use super::{
     config::{DefaultGlobal, HamtConfig},
-    node::{util::HashCode, Collision, NodeHeader},
+    node::{util::HashCode, Collision},
 };
 
 #[derive(Default)]
@@ -16,7 +16,7 @@ pub struct HamtSet<
     Config: HamtConfig<K, ()> = DefaultGlobal,
 > {
     _ph: PhantomData<HamtHasher>,
-    root: Option<Config::Pointer<NodeHeader<K, (), Config>>>,
+    root: Option<Config::NodeStore>,
 }
 
 #[cfg(feature = "std")]

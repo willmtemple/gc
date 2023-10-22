@@ -10,7 +10,7 @@ use super::{
 
 pub struct HamtIterator<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> {
     // We don't edit this. Only hold on to it so that no underlying memory is freed until this iterator is dropped.
-    _root: Option<Config::Pointer<NodeHeader<K, V, Config>>>,
+    _root: Option<Config::NodeStore>,
     size: usize,
     stack: [NodeCursor<'a, K, V, Config>; MAX_LEVEL],
 }
@@ -38,7 +38,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Default for NodeCursor<'_, K, V,
 }
 
 impl<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtIterator<'a, K, V, Config> {
-    pub fn new(root: Option<Config::Pointer<NodeHeader<K, V, Config>>>) -> Self {
+    pub fn new(root: Option<Config::NodeStore>) -> Self {
         if let Some(rn) = root.as_ref() {
             let mut r = Self {
                 _root: root.clone(),
@@ -98,7 +98,7 @@ impl<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtIterator<'a, K, V, Confi
         &mut self.stack[self.size - 1]
     }
 
-    fn find_bottom(&mut self) -> &'a Config::WrappedKvp {
+    fn find_bottom(&mut self) -> &'a Config::Kvp {
         let mut cursor = self.cur();
 
         while let Some(node) = &cursor.node {
