@@ -6,13 +6,10 @@ pub use interior::InnerNode;
 
 use core::hash::Hash;
 use core::marker::PhantomData;
-use core::ptr::Pointee;
 
 use self::util::HashCode;
 
 use super::config::HamtConfig;
-
-use super::util::UsizeMetadata;
 
 pub mod util {
     #[cfg(target_pointer_width = "64")]
@@ -152,16 +149,6 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
     }
 }
 
-impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtNode<K, V, Config>
-    for NodeHeader<K, V, Config>
-{
-    const TAG: NodeType = NodeType::_Header;
-
-    fn header(&self) -> &NodeHeader<K, V, Config> {
-        self
-    }
-}
-
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Drop for NodeHeader<K, V, Config> {
     fn drop(&mut self) {
         match self.upgrade_mut() {
@@ -190,45 +177,25 @@ pub enum NodePtrMut<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> {
 }
 
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
-    pub fn upgrade(&self) -> NodePtr<K, V, Config>
-    where
-        <Collision<K, V, Config> as Pointee>::Metadata: UsizeMetadata,
-        <InnerNode<K, V, Config> as Pointee>::Metadata: UsizeMetadata,
-    {
+    pub fn upgrade(&self) -> NodePtr<K, V, Config> {
         match self.tag() {
             NodeType::Collision => NodePtr::Collision(unsafe {
-                &*core::ptr::from_raw_parts(
-                    self as *const _ as *const (),
-                    <Collision<K, V, Config> as Pointee>::Metadata::from_usize(self.metadata()),
-                )
+                &*core::ptr::from_raw_parts(self as *const _ as *const (), self.metadata())
             }),
             NodeType::Inner => NodePtr::Inner(unsafe {
-                &*(core::ptr::from_raw_parts(
-                    self as *const _ as *const (),
-                    <InnerNode<K, V, Config> as Pointee>::Metadata::from_usize(self.metadata()),
-                ))
+                &*(core::ptr::from_raw_parts(self as *const _ as *const (), self.metadata()))
             }),
             NodeType::_Header => unreachable!(),
         }
     }
 
-    fn upgrade_mut(&mut self) -> NodePtrMut<K, V, Config>
-    where
-        <Collision<K, V, Config> as Pointee>::Metadata: UsizeMetadata,
-        <InnerNode<K, V, Config> as Pointee>::Metadata: UsizeMetadata,
-    {
+    fn upgrade_mut(&mut self) -> NodePtrMut<K, V, Config> {
         match self.tag() {
             NodeType::Collision => NodePtrMut::Collision(unsafe {
-                &mut *core::ptr::from_raw_parts_mut(
-                    self as *mut _ as *mut (),
-                    <Collision<K, V, Config> as Pointee>::Metadata::from_usize(self.metadata()),
-                )
+                &mut *core::ptr::from_raw_parts_mut(self as *mut _ as *mut (), self.metadata())
             }),
             NodeType::Inner => NodePtrMut::Inner(unsafe {
-                &mut *(core::ptr::from_raw_parts_mut(
-                    self as *mut _ as *mut (),
-                    <InnerNode<K, V, Config> as Pointee>::Metadata::from_usize(self.metadata()),
-                ))
+                &mut *(core::ptr::from_raw_parts_mut(self as *mut _ as *mut (), self.metadata()))
             }),
             NodeType::_Header => unreachable!(),
         }

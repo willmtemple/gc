@@ -7,7 +7,7 @@ use core::{
 use crate::{
     lock_default_gc,
     mark::Mark,
-    obj::{GcObjectIdentity, Object, UsizeMetadata},
+    obj::{As, GcObjectIdentity, Object},
     GarbageCollector,
 };
 
@@ -20,11 +20,11 @@ use crate::{
 #[repr(transparent)]
 pub struct Root<T: Mark + ?Sized>(pub(crate) Gc<T>)
 where
-    <Object<T> as Pointee>::Metadata: UsizeMetadata;
+    <Object<T> as Pointee>::Metadata: As<usize>;
 
 impl<T: Mark + ?Sized> Deref for Root<T>
 where
-    <Object<T> as Pointee>::Metadata: UsizeMetadata,
+    <Object<T> as Pointee>::Metadata: As<usize>,
 {
     type Target = T;
 
@@ -35,7 +35,7 @@ where
 
 impl<T: Mark + ?Sized> Root<T>
 where
-    <Object<T> as Pointee>::Metadata: UsizeMetadata,
+    <Object<T> as Pointee>::Metadata: As<usize>,
 {
     /// # Safety
     ///
@@ -76,7 +76,7 @@ impl<T: Mark> Root<T> {
 
 impl<T: Mark + ?Sized> Root<T>
 where
-    <Object<T> as Pointee>::Metadata: UsizeMetadata,
+    <Object<T> as Pointee>::Metadata: As<usize>,
 {
     /// Creates a new GC root from a raw, NonNull pointer.
     ///
@@ -89,11 +89,10 @@ where
     /// Panics if the argument is null.
     pub unsafe fn from_raw(raw: *const T) -> Self
     where
-        <T as Pointee>::Metadata: UsizeMetadata,
+        <T as Pointee>::Metadata: As<usize>,
     {
         let metadata = core::ptr::metadata(raw);
-        let metadata =
-            <<Object<T> as Pointee>::Metadata as UsizeMetadata>::from_usize(metadata.to_usize());
+        let metadata = <<Object<T> as Pointee>::Metadata as As<usize>>::from(As::into(metadata));
         let obj_ptr = core::ptr::from_raw_parts::<Object<T>>(core::ptr::null(), metadata);
 
         let data_ptr = &(*obj_ptr).data;
@@ -158,7 +157,7 @@ impl From<&str> for Root<str> {
 
 impl<T: Mark + ?Sized> Clone for Root<T>
 where
-    <Object<T> as Pointee>::Metadata: UsizeMetadata,
+    <Object<T> as Pointee>::Metadata: As<usize>,
 {
     fn clone(&self) -> Self {
         lock_default_gc(|gc| {
@@ -170,7 +169,7 @@ where
 
 impl<T: Mark + ?Sized> Drop for Root<T>
 where
-    <Object<T> as Pointee>::Metadata: UsizeMetadata,
+    <Object<T> as Pointee>::Metadata: As<usize>,
 {
     fn drop(&mut self) {
         lock_default_gc(|gc| gc.unroot(self.0.ptr))
@@ -237,14 +236,14 @@ impl<T: Mark + ?Sized> Clone for Weak<T> {
 impl<T: Mark + ?Sized> Weak<T> {
     pub fn upgrade(&self) -> Option<Root<T>>
     where
-        <Object<T> as Pointee>::Metadata: UsizeMetadata,
+        <Object<T> as Pointee>::Metadata: As<usize>,
     {
         self.is_present_and(|root| root)
     }
 
     pub fn upgrade_and_then<U>(&self, f: impl FnOnce(&T) -> U) -> Option<U>
     where
-        <Object<T> as Pointee>::Metadata: UsizeMetadata,
+        <Object<T> as Pointee>::Metadata: As<usize>,
     {
         self.upgrade().map(|root| f(&root))
     }
@@ -261,7 +260,7 @@ impl<T: Mark + ?Sized> Weak<T> {
     /// The object's presence is guaranteed as long as the [`Root`] is held.
     pub fn is_present_and<U>(&self, f: impl FnOnce(Root<T>) -> U) -> Option<U>
     where
-        <Object<T> as Pointee>::Metadata: UsizeMetadata,
+        <Object<T> as Pointee>::Metadata: As<usize>,
     {
         let root = lock_default_gc(|gc| {
             if gc.is_present(self.ptr.ptr, self.identity) {

@@ -31,15 +31,15 @@ unsafe impl<K: Eq + Hash + Mark, V: Mark> HamtConfig<K, V> for GcConfig {
     }
 
     fn allocate<T: crate::hamt::node::HamtNode<K, V, Self> + ?Sized>(
-        metadata: <T as core::ptr::Pointee>::Metadata,
-        f: impl FnOnce(&mut T),
+        _metadata: <T as core::ptr::Pointee>::Metadata,
+        _f: impl FnOnce(&mut T),
     ) -> Self::NodeStore {
         todo!()
     }
 
     unsafe fn upgrade_ref<T: crate::hamt::node::HamtNode<K, V, Self> + ?Sized>(
-        ptr: &T,
+        _ptr: &T,
     ) -> Self::NodeStore {
-        todo!()
+        todo!();
     }
 }

@@ -139,33 +139,32 @@ mod dynamic {
         }
     }
 
-    pub trait UsizeMetadata {
-        fn to_usize(self) -> usize;
-
-        fn from_usize(size: usize) -> Self;
+    pub trait As<T> {
+        fn into(self) -> T;
+        fn from(t: T) -> Self;
     }
 
-    impl UsizeMetadata for usize {
+    impl As<usize> for usize {
         #[inline(always)]
-        fn to_usize(self) -> usize {
+        fn into(self) -> usize {
             self
         }
 
         #[inline(always)]
-        fn from_usize(size: usize) -> Self {
+        fn from(size: usize) -> Self {
             size
         }
     }
 
-    impl UsizeMetadata for () {
+    impl As<usize> for () {
         #[inline(always)]
-        fn to_usize(self) -> usize {
+        fn into(self) -> usize {
             0
         }
 
         #[inline(always)]
         #[allow(clippy::unused_unit)]
-        fn from_usize(_: usize) -> Self {
+        fn from(_: usize) -> Self {
             ()
         }
     }
@@ -173,16 +172,16 @@ mod dynamic {
     impl AnyGcObject {
         pub fn new<T: Mark + ?Sized>(ptr: NonNull<Object<T>>) -> Self
         where
-            <Object<T> as Pointee>::Metadata: UsizeMetadata,
+            <Object<T> as Pointee>::Metadata: As<usize>,
         {
             Self {
                 data: GcObjectPtr(ptr.cast()),
-                size: core::ptr::metadata(ptr.as_ptr()).to_usize(),
+                size: As::into(core::ptr::metadata(ptr.as_ptr())),
                 vtable: &GcObjectImpl {
                     mark: |data, size| unsafe {
                         let o = core::ptr::from_raw_parts_mut::<Object<T>>(
                             data.as_ptr(),
-                            <Object<T> as Pointee>::Metadata::from_usize(size),
+                            As::from(size),
                         )
                         .as_mut()
                         .unwrap();

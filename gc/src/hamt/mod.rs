@@ -12,7 +12,6 @@ pub mod vec;
 
 mod iter;
 mod node;
-mod util;
 
 pub use map::HamtMap;
 pub use set::HamtSet;

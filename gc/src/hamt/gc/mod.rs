@@ -10,7 +10,7 @@ use core::{
 use crate::{
     inhibit_collections,
     mark::Mark,
-    obj::{GcObject, UsizeMetadata},
+    obj::GcObject,
     ptr::{Gc, GcRoot},
 };
 
@@ -38,7 +38,7 @@ impl<K: Eq + Hash + Mark, V: Mark> GcAllocator<K, V> {
         init: impl FnOnce(&mut T),
     ) -> Gc<T>
     where
-        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
+        <GcObject<T> as Pointee>::Metadata: As<usize>,
     {
         let ptr = unsafe { GcRoot::<T>::new_uninitialized_with_metadata(metadata).unwrap() };
 
@@ -58,7 +58,7 @@ impl<K: Eq + Hash + Mark, V: Mark> GcAllocator<K, V> {
         ptr: Gc<T>,
     ) -> Gc<NodeHeader<K, V>>
     where
-        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
+        <GcObject<T> as Pointee>::Metadata: As<usize>,
     {
         unsafe { GcRoot::<NodeHeader<K, V>>::from_raw(ptr.ptr.cast()) }.as_unrooted()
     }
@@ -67,12 +67,12 @@ impl<K: Eq + Hash + Mark, V: Mark> GcAllocator<K, V> {
         ptr: &T,
     ) -> Gc<NodeHeader<K, V>>
     where
-        <GcObject<T> as Pointee>::Metadata: UsizeMetadata,
-        <T as Pointee>::Metadata: UsizeMetadata,
+        <GcObject<T> as Pointee>::Metadata: As<usize>,
+        <T as Pointee>::Metadata: As<usize>,
     {
         let obj_ptr = core::ptr::from_raw_parts::<GcObject<T>>(
             core::ptr::null(),
-            <<GcObject<T> as Pointee>::Metadata as UsizeMetadata>::from_usize(
+            <<GcObject<T> as Pointee>::Metadata as As<usize>>::from_usize(
                 core::ptr::metadata(ptr).to_usize(),
             ),
         );
@@ -389,8 +389,8 @@ enum NodePtrMut<'a, K: Eq + Hash + Mark, V: Mark> {
 impl<K: Eq + Hash + Mark, V: Mark> NodeHeader<K, V> {
     fn upgrade(&self) -> NodePtr<K, V>
     where
-        <LeafNode<K, V> as Pointee>::Metadata: UsizeMetadata,
-        <InnerNode<K, V> as Pointee>::Metadata: UsizeMetadata,
+        <LeafNode<K, V> as Pointee>::Metadata: As<usize>,
+        <InnerNode<K, V> as Pointee>::Metadata: As<usize>,
     {
         match self.tag() {
             NodeType::Leaf => NodePtr::Leaf(unsafe {
@@ -411,8 +411,8 @@ impl<K: Eq + Hash + Mark, V: Mark> NodeHeader<K, V> {
 
     fn upgrade_mut(&mut self) -> NodePtrMut<K, V>
     where
-        <LeafNode<K, V> as Pointee>::Metadata: UsizeMetadata,
-        <InnerNode<K, V> as Pointee>::Metadata: UsizeMetadata,
+        <LeafNode<K, V> as Pointee>::Metadata: As<usize>,
+        <InnerNode<K, V> as Pointee>::Metadata: As<usize>,
     {
         match self.tag() {
             NodeType::Leaf => NodePtrMut::Leaf(unsafe {
