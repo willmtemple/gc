@@ -1,4 +1,4 @@
-pub use derive::Mark;
+pub use derive_mark::Mark;
 
 pub trait Mark {
     fn mark(&mut self);

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["gc", "derive", "hamt", "min_test"]
+members = ["gc", "gc/derive_mark", "hamt", "min_test"]
 
 [profile.release]
 lto = true

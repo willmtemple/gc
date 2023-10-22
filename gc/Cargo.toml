@@ -16,4 +16,4 @@ rand = { version = "0.8", default-features = false, features = [
     "alloc",
     "getrandom",
 ] }
-derive = { path = "../derive/" }
+derive_mark = { path = "./derive_mark/" }
