@@ -17,10 +17,3 @@ rand = { version = "0.8", default-features = false, features = [
     "getrandom",
 ] }
 derive = { path = "../derive/" }
-
-[profile.release]
-lto = true
-opt-level = "s"
-# strip = true
-panic = "abort"
-codegen-units = 1
