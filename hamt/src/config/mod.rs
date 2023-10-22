@@ -10,7 +10,7 @@ pub use rc::RcGlobal;
 pub mod clone;
 pub use clone::CloneKvpArcGlobal;
 
-mod gc;
+mod common;
 
 use core::{hash::Hash, ops::Deref, ptr::Pointee};
 

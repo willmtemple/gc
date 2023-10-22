@@ -1,6 +1,6 @@
 use core::{cmp::Ordering, hash::Hash};
 
-use crate::hamt::{
+use crate::{
     config::HamtConfig,
     node::{
         util::{hash_bits_for_level, BITMAP_INDEX_BITS, MAX_LEVEL},

@@ -3,7 +3,7 @@ use core::{
     marker::PhantomData,
 };
 
-use super::{
+use crate::{
     config::{DefaultGlobal, HamtConfig},
     node::{util::HashCode, Collision},
 };

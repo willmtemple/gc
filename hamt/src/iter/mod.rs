@@ -1,6 +1,6 @@
 use core::{hash::Hash, ops::Deref};
 
-use crate::hamt::node::NodePtr;
+use crate::node::NodePtr;
 
 use super::{
     config::{HamtConfig, Kvp},

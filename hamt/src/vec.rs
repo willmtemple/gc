@@ -3,10 +3,8 @@ use core::{
     ops::{Deref, Index},
 };
 
-use crate::hamt::config::Kvp;
-
-use super::{
-    config::{DefaultGlobal, HamtConfig},
+use crate::{
+    config::{DefaultGlobal, HamtConfig, Kvp},
     iter::HamtIterator,
     node::{util::HashCode, Collision},
 };
@@ -111,7 +109,7 @@ impl<V, Config: HamtConfig<(), V>> HamtVec<V, Config> {
         HamtIterator::<(), V, Config>::new(self.root.clone()).map(|v| v.1)
     }
 
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(feature = "std")]
     pub fn print(&self)
     where
         V: core::fmt::Debug,

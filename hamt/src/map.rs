@@ -5,7 +5,7 @@ use core::{
     ops::Index,
 };
 
-use super::{
+use crate::{
     config::{DefaultGlobal, HamtConfig, Kvp},
     iter::HamtIterator,
     node::{util::HashCode, Collision},
@@ -132,13 +132,13 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
         HamtIterator::<K, V, Config>::new(self.root.clone())
     }
 
-    #[cfg(all(test, feature = "std"))]
+    #[cfg(feature = "std")]
     pub fn print(&self)
     where
         K: core::fmt::Debug,
         V: core::fmt::Debug,
     {
-        use crate::hamt::node::NodePtr;
+        use crate::node::NodePtr;
 
         if self.root.is_none() {
             println!("Empty HAMT.");

@@ -1,10 +1,8 @@
-use crate::hamt::config::CloneKvpArcGlobal;
-
-use super::HamtVec;
+use hamt::{config::CloneKvpArcGlobal, HamtMap, HamtVec};
 
 #[test]
 fn print_trees() {
-    let hamt_mt = super::HamtMap::<u64, u64>::new();
+    let hamt_mt = HamtMap::<u64, u64>::new();
 
     assert!(hamt_mt.get(&0).is_none());
 

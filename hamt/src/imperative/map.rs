@@ -1,6 +1,6 @@
 use core::hash::{Hash, Hasher};
 
-use crate::hamt::{
+use crate::{
     config::{DefaultGlobal, HamtConfig},
     HamtMap,
 };

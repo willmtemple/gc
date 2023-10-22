@@ -7,9 +7,9 @@ pub use interior::InnerNode;
 use core::hash::Hash;
 use core::marker::PhantomData;
 
-use self::util::HashCode;
+use crate::config::HamtConfig;
 
-use super::config::HamtConfig;
+use util::HashCode;
 
 pub mod util {
     #[cfg(target_pointer_width = "64")]
