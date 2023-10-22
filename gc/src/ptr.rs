@@ -18,7 +18,7 @@ use crate::{
 ///
 /// This is the best type to use when working with GC objects on the Rust stack.
 #[repr(transparent)]
-pub struct Root<T: Mark + ?Sized>(pub(crate) Raw<T>)
+pub struct Root<T: Mark + ?Sized>(pub(crate) Gc<T>)
 where
     <Object<T> as Pointee>::Metadata: UsizeMetadata;
 
@@ -42,7 +42,7 @@ where
     /// Callers must ensure that the return value of this function is stored in a location that is connected to the GC
     /// root graph before dropping `self`, otherwise the object may be collected and the returned pointer may be
     /// invalidated.
-    pub unsafe fn as_unrooted(&self) -> Raw<T> {
+    pub unsafe fn as_unrooted(&self) -> Gc<T> {
         self.0
     }
 
@@ -52,7 +52,7 @@ where
         lock_default_gc(|gc| {
             gc.allocate::<T>(metadata).map(|ptr| {
                 gc.root(ptr);
-                Self(Raw { ptr })
+                Self(Gc { ptr })
             })
         })
     }
@@ -78,13 +78,50 @@ impl<T: Mark + ?Sized> Root<T>
 where
     <Object<T> as Pointee>::Metadata: UsizeMetadata,
 {
-    /// Locks the GC and creates a new GC root from a raw, NonNull pointer.
+    /// Creates a new GC root from a raw, NonNull pointer.
     ///
     /// # Safety
-    /// Callers must ensure that the pointer is valid and points to a GC object that has been initialized. The object
-    /// is immediately rooted.
-    pub unsafe fn from_raw(raw: Raw<T>) -> Self {
-        Self(raw)
+    ///
+    /// The argument to this function _MUST_ have come from a previous call to [`Self::into_raw`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the argument is null.
+    pub unsafe fn from_raw(raw: *const T) -> Self
+    where
+        <T as Pointee>::Metadata: UsizeMetadata,
+    {
+        let metadata = core::ptr::metadata(raw);
+        let metadata =
+            <<Object<T> as Pointee>::Metadata as UsizeMetadata>::from_usize(metadata.to_usize());
+        let obj_ptr = core::ptr::from_raw_parts::<Object<T>>(core::ptr::null(), metadata);
+
+        let data_ptr = &(*obj_ptr).data;
+
+        assert_eq!(
+            obj_ptr as *const () as usize,
+            raw as *const _ as *const () as usize
+        );
+
+        let offset = (data_ptr as *const _ as *const () as usize) - (obj_ptr as *const () as usize);
+
+        let real_ptr = (raw as *const _ as *const () as usize - offset) as *mut ();
+
+        Self(Gc {
+            ptr: NonNull::new_unchecked(core::ptr::from_raw_parts_mut(real_ptr, metadata)),
+        })
+    }
+
+    /// Consumes the GC root returning a raw pointer to its data.
+    ///
+    /// # Safety
+    ///
+    /// The object remains rooted. You must pass the pointer back to [`Self::from_raw`] to get a valid GC root again,
+    /// otherwise you will leak the object.
+    #[allow(clippy::unnecessary_cast)]
+    pub unsafe fn into_raw(root: Self) -> *const T {
+        let ptr = root.0.ptr.as_ptr();
+        core::ptr::addr_of!((*ptr).data) as *const T
     }
 
     pub fn get_weak(&self) -> Weak<T> {
@@ -149,11 +186,11 @@ where
 /// This object may be collected if no roots refer to it, and its liveness is not validated. For strict liveness
 /// guarantees, use [`Root`] or [`Weak`].
 #[repr(transparent)]
-pub struct Raw<T: ?Sized> {
+pub struct Gc<T: ?Sized> {
     pub(crate) ptr: NonNull<Object<T>>,
 }
 
-impl<T: Mark + ?Sized> Raw<T> {
+impl<T: Mark + ?Sized> Gc<T> {
     pub fn get_weak(&self) -> Weak<T> {
         Weak {
             ptr: *self,
@@ -162,21 +199,21 @@ impl<T: Mark + ?Sized> Raw<T> {
     }
 }
 
-impl<T: Mark + ?Sized> Mark for Raw<T> {
+impl<T: Mark + ?Sized> Mark for Gc<T> {
     fn mark(&mut self) {
         unsafe { self.ptr.as_mut() }.mark()
     }
 }
 
-impl<T: ?Sized> Copy for Raw<T> {}
+impl<T: ?Sized> Copy for Gc<T> {}
 
-impl<T: ?Sized> Clone for Raw<T> {
+impl<T: ?Sized> Clone for Gc<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: ?Sized> Deref for Raw<T> {
+impl<T: ?Sized> Deref for Gc<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -185,7 +222,7 @@ impl<T: ?Sized> Deref for Raw<T> {
 }
 
 pub struct Weak<T: Mark + ?Sized> {
-    ptr: Raw<T>,
+    ptr: Gc<T>,
     identity: GcObjectIdentity,
 }
 
@@ -229,7 +266,7 @@ impl<T: Mark + ?Sized> Weak<T> {
         let root = lock_default_gc(|gc| {
             if gc.is_present(self.ptr.ptr, self.identity) {
                 gc.root(self.ptr.ptr);
-                Some(unsafe { Root::from_raw(self.ptr) })
+                Some(Root(self.ptr))
             } else {
                 None
             }

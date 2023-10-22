@@ -92,7 +92,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
                 inner.bitmap = bitmap;
 
                 let new_node = Collision::<K, V, Config>::create_with_pair(key, value, hash);
-                let this_node = Config::ptr_from_ref_reinterpret(self);
+                let this_node = Config::upgrade_ref(self);
 
                 match new_bits_for_next_level.cmp(&self_bits_for_next_level) {
                     Ordering::Less => {
@@ -192,7 +192,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
 
         if !occupied {
             // The key is not in the map.
-            return Some(unsafe { Config::ptr_from_ref_reinterpret(self) });
+            return Some(unsafe { Config::upgrade_ref(self) });
         }
 
         let masked_bitmap = ((1 << index) - 1) & self.bitmap;
@@ -205,7 +205,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
         if let Some(next) = next {
             if core::ptr::eq(&*next, cur_ptr) {
                 // The child was not removed.
-                return Some(unsafe { Config::ptr_from_ref_reinterpret(self) });
+                return Some(unsafe { Config::upgrade_ref(self) });
             }
 
             // The child was modified. We have a new pointer that we want to replace our current pointer with, but the

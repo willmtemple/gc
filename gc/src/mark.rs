@@ -120,7 +120,7 @@ mod tests {
     use crate::{
         lock_default_gc,
         mark::Mark,
-        ptr::{Raw, Root},
+        ptr::{Gc, Root},
         GarbageCollector,
     };
 
@@ -128,15 +128,15 @@ mod tests {
     fn derive_mark() {
         #[derive(Mark)]
         struct Foo {
-            a: Raw<str>,
+            a: Gc<str>,
             b: [Bar; 3],
         }
 
         #[derive(Mark)]
         enum Bar {
             A,
-            B(usize, Raw<usize>),
-            C { a: Raw<str>, b: usize },
+            B(usize, Gc<usize>),
+            C { a: Gc<str>, b: usize },
         }
 
         let rstr = Root::<str>::from("Hello world!");

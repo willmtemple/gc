@@ -76,7 +76,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
                 inner.bitmap = bitmap;
 
                 let new_node = Self::create_with_pair(key, value, hash);
-                let this_collision = Config::ptr_from_ref_reinterpret(self);
+                let this_collision = Config::upgrade_ref(self);
 
                 match new_bits_for_next_level.cmp(&self_bits_for_next_level) {
                     Ordering::Less => {
@@ -96,7 +96,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
     pub fn remove(&self, key: &K, hash: HashCode) -> Option<Config::NodeStore> {
         if hash != self.hash() {
             // The key is not in the map.
-            return Some(unsafe { Config::ptr_from_ref_reinterpret(self) });
+            return Some(unsafe { Config::upgrade_ref(self) });
         }
 
         let cur_value = self
@@ -130,7 +130,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
             }
         } else {
             // The key is not in the collision node.
-            Some(unsafe { Config::ptr_from_ref_reinterpret(self) })
+            Some(unsafe { Config::upgrade_ref(self) })
         }
     }
 

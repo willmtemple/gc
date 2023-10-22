@@ -351,7 +351,7 @@ mod tests {
     use crate::{
         lock_default_gc,
         mark::Mark,
-        ptr::{Raw, Root},
+        ptr::{Gc, Root},
         GarbageCollector,
     };
 
@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn test_indirect() {
         struct Foo {
-            bar: Raw<str>,
+            bar: Gc<str>,
         }
 
         impl Mark for Foo {

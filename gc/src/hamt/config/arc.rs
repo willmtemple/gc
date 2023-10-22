@@ -65,19 +65,7 @@ unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for ArcGlobal {
         unsafe { Arc::from_raw((*data).header()) }
     }
 
-    // unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
-    //     ptr: Self::NodeStore<T>,
-    // ) -> Self::NodeStore<NodeHeader<K, V, Self>> {
-    //     unsafe {
-    //         let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
-    //         Arc::increment_strong_count(raw);
-    //         Arc::from_raw(raw)
-    //     }
-    // }
-
-    unsafe fn ptr_from_ref_reinterpret<T: HamtNode<K, V, Self> + ?Sized>(
-        ptr: &T,
-    ) -> Self::NodeStore {
+    unsafe fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore {
         unsafe {
             let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
             Arc::increment_strong_count(raw);

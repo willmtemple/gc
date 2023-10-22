@@ -8,7 +8,7 @@ use core::{
 use super::{
     config::{DefaultGlobal, HamtConfig, Kvp},
     iter::HamtIterator,
-    node::{util::HashCode, Collision, NodeHeader},
+    node::{util::HashCode, Collision},
 };
 
 pub struct HamtMap<

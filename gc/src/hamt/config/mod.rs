@@ -10,6 +10,8 @@ pub use rc::RcGlobal;
 pub mod clone;
 pub use clone::CloneKvpArcGlobal;
 
+mod gc;
+
 use core::{hash::Hash, ops::Deref, ptr::Pointee};
 
 use super::node::{HamtNode, NodeHeader};
@@ -46,15 +48,6 @@ pub unsafe trait HamtConfig<K: Eq + Hash, V>: Copy {
         f: impl FnOnce(&mut T),
     ) -> Self::NodeStore;
 
-    // /// Downgrade a pointer to a HAMT node into a pointer to a Node header.
-    // ///
-    // /// # Safety
-    // ///
-    // /// This amounts to transmutation.
-    // unsafe fn downgrade_ptr<T: HamtNode<K, V, Self> + ?Sized>(
-    //     ptr: Self::NodeStore<T>,
-    // ) -> Self::NodeStore<NodeHeader<K, V, Self>>;
-
     /// Reinterpret a ref to a HAMT node into a pointer to a Node header and convert it to a Ptr.
     ///
     /// # Safety
@@ -64,7 +57,5 @@ pub unsafe trait HamtConfig<K: Eq + Hash, V>: Copy {
     ///
     /// This should return a NEW pointer. In case of refcounting or other memory management schemes, treat
     /// this as if it creates a NEW, ADDITIONAL pointer.
-    unsafe fn ptr_from_ref_reinterpret<T: HamtNode<K, V, Self> + ?Sized>(
-        ptr: &T,
-    ) -> Self::NodeStore;
+    unsafe fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore;
 }

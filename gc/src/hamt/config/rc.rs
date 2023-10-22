@@ -75,9 +75,7 @@ unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for RcGlobal {
     //     }
     // }
 
-    unsafe fn ptr_from_ref_reinterpret<T: HamtNode<K, V, Self> + ?Sized>(
-        ptr: &T,
-    ) -> Self::NodeStore {
+    unsafe fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore {
         unsafe {
             let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Self>;
             Rc::increment_strong_count(raw);
