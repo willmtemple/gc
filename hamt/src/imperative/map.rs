@@ -1,7 +1,7 @@
 use core::hash::{Hash, Hasher};
 
 use crate::{
-    config::{DefaultGlobal, HamtConfig},
+    config::{DefaultConfig, HamtConfig},
     HamtMap,
 };
 
@@ -11,7 +11,7 @@ pub struct ImperativeHamtMap<
     V,
     #[cfg(feature = "std")] HamtHasher: Hasher + Default = std::collections::hash_map::DefaultHasher,
     #[cfg(not(feature = "std"))] HamtHasher: Hasher + Default,
-    Config: HamtConfig<K, V> = DefaultGlobal,
+    Config: HamtConfig<K, V> = DefaultConfig,
 > {
     hamt: Box<HamtMap<K, V, HamtHasher, Config>>,
 }

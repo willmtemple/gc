@@ -4,13 +4,13 @@ use core::{
 };
 
 use crate::{
-    config::{DefaultGlobal, HamtConfig, Kvp},
+    config::{DefaultConfig, HamtConfig, Kvp},
     iter::HamtIterator,
     node::{util::HashCode, Collision},
 };
 
 #[derive(Default)]
-pub struct HamtVec<V, Config: HamtConfig<(), V> = DefaultGlobal> {
+pub struct HamtVec<V, Config: HamtConfig<(), V> = DefaultConfig> {
     size: usize,
     root: Option<Config::NodeStore>,
 }

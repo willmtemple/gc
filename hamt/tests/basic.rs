@@ -1,4 +1,4 @@
-use hamt::{config::CloneKvpArcGlobal, HamtMap, HamtVec};
+use hamt::{config::CloningConfig, HamtMap, HamtVec};
 
 #[test]
 fn print_trees() {
@@ -68,7 +68,7 @@ fn print_trees() {
 
 #[test]
 fn hamt_vec() {
-    let mut hv = HamtVec::<i32, CloneKvpArcGlobal>::new();
+    let mut hv = HamtVec::<i32, CloningConfig>::new();
 
     hv = hv.push(0);
 
@@ -110,7 +110,7 @@ fn hamt_vec() {
 #[test]
 fn hv_iter() {
     let v = [0, 1, 2, 3, 4, 5, 6, 7];
-    let mut hv = HamtVec::<i32, CloneKvpArcGlobal>::new();
+    let mut hv = HamtVec::<i32, CloningConfig>::new();
 
     for i in v.iter() {
         hv = hv.push(*i);

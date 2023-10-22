@@ -6,7 +6,7 @@ use core::{
 };
 
 use crate::{
-    config::{DefaultGlobal, HamtConfig, Kvp},
+    config::{DefaultConfig, HamtConfig, Kvp},
     iter::HamtIterator,
     node::{util::HashCode, Collision},
 };
@@ -16,7 +16,7 @@ pub struct HamtMap<
     V,
     #[cfg(feature = "std")] HamtHasher: Hasher + Default = std::collections::hash_map::DefaultHasher,
     #[cfg(not(feature = "std"))] HamtHasher: Hasher + Default,
-    Config: HamtConfig<K, V> = DefaultGlobal,
+    Config: HamtConfig<K, V> = DefaultConfig,
 > {
     _ph: PhantomData<(K, V, Config, HamtHasher)>,
     root: Option<Config::NodeStore>,

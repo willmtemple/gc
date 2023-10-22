@@ -7,9 +7,9 @@ use crate::node::{HamtNode, NodeHeader};
 use super::{common, HamtConfig};
 
 #[derive(Clone, Copy)]
-pub struct ArcGlobal;
+pub struct ArcConfig;
 
-unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for ArcGlobal {
+unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for ArcConfig {
     type NodeStore = Arc<NodeHeader<K, V, Self>>;
 
     type Kvp = Arc<(K, V)>;

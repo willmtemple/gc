@@ -2,13 +2,13 @@ pub mod kvp;
 pub use kvp::*;
 
 pub mod arc;
-pub use arc::ArcGlobal;
+pub use arc::ArcConfig;
 
 pub mod rc;
 pub use rc::RcGlobal;
 
 pub mod clone;
-pub use clone::CloneKvpArcGlobal;
+pub use clone::CloningConfig;
 
 mod common;
 
@@ -18,7 +18,7 @@ use super::node::{HamtNode, NodeHeader};
 
 /// The default configuration for HAMTs. This configuration uses `Arc` for both pointers and key-value pairs, and it
 /// allocates all nodes on the heap using the global allocator.
-pub type DefaultGlobal = ArcGlobal;
+pub type DefaultConfig = ArcConfig;
 
 /// # Safety
 ///

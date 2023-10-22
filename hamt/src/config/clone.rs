@@ -7,9 +7,9 @@ use crate::node::{HamtNode, NodeHeader};
 use super::{common, HamtConfig, Pair};
 
 #[derive(Copy, Clone)]
-pub struct CloneKvpArcGlobal;
+pub struct CloningConfig;
 
-unsafe impl<K: Eq + Hash + Clone, V: Clone> HamtConfig<K, V> for CloneKvpArcGlobal {
+unsafe impl<K: Eq + Hash + Clone, V: Clone> HamtConfig<K, V> for CloningConfig {
     type NodeStore = Arc<NodeHeader<K, V, Self>>;
 
     type Kvp = Pair<K, V>;
