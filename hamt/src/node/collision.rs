@@ -1,11 +1,8 @@
-use core::{cmp::Ordering, hash::Hash, marker::PhantomData};
+use core::hash::Hash;
 
 use crate::{
     config::{HamtConfig, Kvp},
-    node::{
-        util::{hash_bits_for_level, BITMAP_INDEX_BITS, MAX_LEVEL},
-        InnerNode,
-    },
+    node::{util::MAX_LEVEL, InteriorNode, LeafNode},
 };
 
 use super::{util::HashCode, HamtNode, NodeHeader, NodeType};
@@ -13,83 +10,39 @@ use super::{util::HashCode, HamtNode, NodeHeader, NodeType};
 use core::ptr::write;
 
 #[repr(C)]
-pub struct Collision<K: Eq + Hash, V, Config: HamtConfig<K, V>> {
+pub struct CollisionNode<K: Eq + Hash, V, Config: HamtConfig<K, V>> {
     pub(crate) _header: NodeHeader<K, V, Config>,
-    _ph: PhantomData<Config>,
-    // path: Path,
     pub(crate) values: [Config::Kvp],
 }
 
-impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
-    fn hash(&self) -> HashCode {
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
+    pub(crate) fn hash(&self) -> HashCode {
         self._header.hash
+    }
+
+    fn find(&self, key: &K) -> Option<(usize, &Config::Kvp)> {
+        self.values
+            .iter()
+            .enumerate()
+            .find(|(_, kvp)| kvp.key() == key)
     }
 
     pub fn get(&self, key: &K, hash: HashCode) -> Option<&Config::Kvp> {
         if hash != self.hash() {
             None
         } else {
-            self.values.iter().find(|kvp| kvp.key() == key)
+            self.find(key).map(|v| v.1)
         }
     }
 
     pub fn insert(&self, key: K, value: V, hash: HashCode) -> Config::NodeStore {
-        // eprintln!(
-        //     "Inserting hash {:#066b} into collision node with hash {:#066b}",
-        //     hash,
-        //     self.hash()
-        // );
-
-        let leading_same_bits = (hash ^ self.hash()).leading_zeros();
-        let collision = leading_same_bits == 64;
-
-        if collision {
+        if hash == self.hash() {
             self.add_pair(key, value)
         } else {
-            // Not a collision, but the hashes are the same up to some level. We will return an inner node that
-            // has one or both of the patterns as children.
-
-            // NEW LOGIC
-            // We find the level at which the hashes are the same, then create an InnerNode at that level.
-
-            let next_level = if leading_same_bits < 4 {
-                0
-            } else {
-                ((leading_same_bits - 4) / (BITMAP_INDEX_BITS as u32)) as usize + 1
-            };
-            let new_bits_for_next_level = hash_bits_for_level(hash, next_level);
-            let self_bits_for_next_level = hash_bits_for_level(self.hash(), next_level);
-            let bitmap = (1 << new_bits_for_next_level) | (1 << self_bits_for_next_level);
-
-            // eprintln!(
-            //     "Creating inner node at level {} ({} leading same bits)",
-            //     next_level, leading_same_bits
-            // );
-
-            debug_assert!(next_level < MAX_LEVEL);
-
-            Config::allocate::<InnerNode<K, V, Config>>(2, move |inner| unsafe {
-                write(
-                    &mut inner._header,
-                    NodeHeader::new::<InnerNode<K, V, Config>>(next_level, 2, hash),
-                );
-                inner.bitmap = bitmap;
-
-                let new_node = Self::create_with_pair(key, value, hash);
-                let this_collision = Config::upgrade_ref(self);
-
-                match new_bits_for_next_level.cmp(&self_bits_for_next_level) {
-                    Ordering::Less => {
-                        write(&mut inner.children[0], new_node);
-                        write(&mut inner.children[1], this_collision);
-                    }
-                    Ordering::Greater => {
-                        write(&mut inner.children[0], this_collision);
-                        write(&mut inner.children[1], new_node);
-                    }
-                    Ordering::Equal => unreachable!(),
-                }
-            })
+            InteriorNode::<K, V, Config>::reparent(
+                unsafe { Config::upgrade_ref(self) },
+                LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
+            )
         }
     }
 
@@ -113,20 +66,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
                 // The key is in the collision node, but there are other keys. We can remove the key from the collision
                 // node.
 
-                Some(Config::allocate::<Self>(
-                    self.values.len() - 1,
-                    |collision| unsafe {
-                        write(
-                            &mut collision._header,
-                            NodeHeader::new::<Self>(MAX_LEVEL, self.values.len() - 1, hash),
-                        );
-                        for i in 0..self.values.len() {
-                            if i != idx {
-                                write(&mut collision.values[i], self.values[i].clone());
-                            }
-                        }
-                    },
-                ))
+                Some(self.remove_idx(idx))
             }
         } else {
             // The key is not in the collision node.
@@ -134,39 +74,11 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
         }
     }
 
-    pub fn create_with_pair(key: K, value: V, hash: HashCode) -> Config::NodeStore {
-        Config::allocate::<Collision<K, V, Config>>(1, |collision| unsafe {
-            write(
-                &mut collision._header,
-                NodeHeader::new::<Self>(MAX_LEVEL, 1, hash),
-            );
-
-            debug_assert!(
-                (&collision.values[..] as *const _ as *const () as usize)
-                    % core::mem::align_of::<Config::Kvp>()
-                    == 0
-            );
-
-            let kvp = Config::wrap_kvp(key, value);
-
-            debug_assert!(
-                (&collision.values[0] as *const _ as *const () as usize)
-                    % core::mem::align_of::<Config::Kvp>()
-                    == 0
-            );
-
-            write(&mut collision.values[0], kvp);
-        })
-    }
-
     fn add_pair(&self, key: K, value: V) -> Config::NodeStore {
-        let cur_value = self
-            .values
-            .iter()
-            .enumerate()
-            .find(|(_, kvp)| kvp.key() == &key);
+        let cur_value = self.find(&key);
 
         if let Some((idx, _)) = cur_value {
+            // Key is present in the collision, so replace it.
             Config::allocate::<Self>(self.values.len(), move |collision| unsafe {
                 write(&mut collision._header, self._header.clone());
                 for i in 0..self.values.len() {
@@ -175,31 +87,51 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Collision<K, V, Config> {
                     }
                 }
 
-                write(&mut collision.values[idx], Config::wrap_kvp(key, value));
+                write(&mut collision.values[idx], Config::Kvp::new(key, value));
             })
         } else {
+            // Key is not present in the collision, so add it.
             let next_len = self.values.len() + 1;
 
             assert!(next_len <= NodeHeader::<K, V, Config>::SIZE_MASK);
 
-            Config::allocate::<Self>(self.values.len() + 1, |leaf| unsafe {
+            Config::allocate::<Self>(next_len, |leaf| unsafe {
                 write(
                     &mut leaf._header,
-                    NodeHeader::new::<Self>(MAX_LEVEL, self.values.len() + 1, self.hash()),
+                    NodeHeader::new::<Self>(MAX_LEVEL, next_len, self.hash()),
                 );
                 for i in 0..self.values.len() {
                     write(&mut leaf.values[i], self.values[i].clone());
                 }
                 write(
                     &mut leaf.values[self.values.len()],
-                    Config::wrap_kvp(key, value),
+                    Config::Kvp::new(key, value),
                 );
             })
         }
     }
+
+    fn remove_idx(&self, idx: usize) -> Config::NodeStore {
+        debug_assert!(self.values.len() > 1);
+
+        Config::allocate::<Self>(self.values.len() - 1, |collision| unsafe {
+            write(
+                &mut collision._header,
+                NodeHeader::new::<Self>(MAX_LEVEL, self.values.len() - 1, self.hash()),
+            );
+            for i in 0..idx {
+                write(&mut collision.values[i], self.values[i].clone());
+            }
+            for i in idx + 1..self.values.len() {
+                write(&mut collision.values[i - 1], self.values[i].clone());
+            }
+        })
+    }
 }
 
-impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtNode<K, V, Config> for Collision<K, V, Config> {
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtNode<K, V, Config>
+    for CollisionNode<K, V, Config>
+{
     const TAG: NodeType = NodeType::Collision;
 
     fn header(&self) -> &NodeHeader<K, V, Config> {

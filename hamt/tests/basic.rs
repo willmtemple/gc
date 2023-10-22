@@ -113,12 +113,41 @@ fn hv_iter() {
     let mut hv = HamtVec::<i32, CloningConfig>::new();
 
     for i in v.iter() {
+        hv.print();
         hv = hv.push(*i);
     }
 
     for (idx, v) in hv.iter().enumerate() {
-        // eprintln!("Checking index: {} with value {}", idx, v);
+        eprintln!("Checking index: {} with value {}", idx, v);
         assert_eq!(*v, idx as i32);
+    }
+
+    let slice = hv.slice(1..5);
+
+    assert_eq!(slice.len(), 4);
+    assert_eq!(slice[0], 1);
+    assert_eq!(slice[1], 2);
+    assert_eq!(slice[2], 3);
+    assert_eq!(slice[3], 4);
+
+    eprintln!("Starting slice iter.");
+
+    for (idx, v) in slice.iter().enumerate() {
+        eprintln!("Checking index: {} with value {}", idx, v);
+        assert_eq!(*v, idx as i32 + 1);
+    }
+
+    if HamtVec::<i32, CloningConfig>::new().iter().next().is_some() {
+        unreachable!();
+    }
+
+    if HamtVec::<i32, CloningConfig>::new()
+        .slice(0..0)
+        .iter()
+        .next()
+        .is_some()
+    {
+        unreachable!();
     }
 }
 

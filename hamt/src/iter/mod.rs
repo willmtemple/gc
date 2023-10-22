@@ -1,6 +1,9 @@
 use core::{hash::Hash, ops::Deref};
 
-use crate::node::NodePtr;
+use crate::node::{
+    util::{hash_bits_for_level, HashCode},
+    HamtNode, NodePtr,
+};
 
 use super::{
     config::{HamtConfig, Kvp},
@@ -67,11 +70,53 @@ impl<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtIterator<'a, K, V, Confi
         }
     }
 
+    /// Sets the cursor to the base node (leaf or collision) with the given hash code.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the hash code is not in the tree.
+    pub(crate) fn set_cursor(&mut self, hash: HashCode) {
+        const MESSAGE: &str = "unexpected error: set_cursor could not find hash code in trie";
+
+        let mut node = self._root.clone().expect(MESSAGE);
+
+        loop {
+            match node.upgrade() {
+                NodePtr::Leaf(l) => {
+                    assert_eq!(l.hash(), hash, "{}", MESSAGE);
+                    self.push(l.header(), 0);
+                    break;
+                }
+                NodePtr::Collision(col) => {
+                    assert_eq!(col.hash(), hash, "{}", MESSAGE);
+                    self.push(col.header(), 0);
+                    break;
+                }
+                NodePtr::Interior(int) => {
+                    // Traverse the node, and push it to the stack
+                    let index = hash_bits_for_level(hash, int._header.level()) as usize;
+                    let mask = (1 << index) - 1;
+                    let occupied = (int.bitmap & (1 << index)) != 0;
+
+                    let pop = (int.bitmap & mask).count_ones() as usize;
+
+                    if !occupied || pop >= int.children.len() {
+                        panic!("{}", MESSAGE);
+                    }
+
+                    self.push(int.header(), pop);
+
+                    node = int.children[pop].clone();
+                }
+            }
+        }
+    }
+
     fn is_empty(&self) -> bool {
         self.size == 0
     }
 
-    fn push(&mut self, node: &NodeHeader<K, V, Config>) {
+    fn push(&mut self, node: &NodeHeader<K, V, Config>, index: usize) {
         assert!(self.size < MAX_LEVEL);
 
         let cursor = NodeCursor {
@@ -80,7 +125,7 @@ impl<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtIterator<'a, K, V, Confi
                     node,
                 )
             }),
-            index: 0,
+            index,
         };
 
         self.stack[{
@@ -103,11 +148,14 @@ impl<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtIterator<'a, K, V, Confi
 
         while let Some(node) = &cursor.node {
             match node.upgrade() {
-                NodePtr::Collision(l) => {
-                    return &l.values[cursor.index];
+                NodePtr::Leaf(leaf) => {
+                    return &leaf.entry;
                 }
-                NodePtr::Inner(node) => {
-                    self.push(&node.children[cursor.index]);
+                NodePtr::Collision(col) => {
+                    return &col.values[cursor.index];
+                }
+                NodePtr::Interior(inner) => {
+                    self.push(&inner.children[cursor.index], 0);
                     cursor = self.cur();
                 }
             }
@@ -122,6 +170,9 @@ impl<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtIterator<'a, K, V, Confi
             let node = cursor.node.as_ref().expect("unreachable None node in shr");
 
             match node.upgrade() {
+                NodePtr::Leaf(_) => {
+                    self.size -= 1;
+                }
                 NodePtr::Collision(l) => {
                     if cursor.index < l.values.len() - 1 {
                         cursor.index += 1;
@@ -130,7 +181,7 @@ impl<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtIterator<'a, K, V, Confi
                         self.size -= 1;
                     }
                 }
-                NodePtr::Inner(i) => {
+                NodePtr::Interior(i) => {
                     if cursor.index < i.children.len() - 1 {
                         cursor.index += 1;
                         break;

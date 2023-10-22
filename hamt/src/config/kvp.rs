@@ -1,6 +1,8 @@
 use alloc::{rc::Rc, sync::Arc};
 
 pub trait Kvp<K, V>: Clone {
+    fn new(key: K, value: V) -> Self;
+
     fn key(&self) -> &K;
 
     fn value(&self) -> &V;
@@ -11,6 +13,10 @@ pub trait Kvp<K, V>: Clone {
 }
 
 impl<K, V> Kvp<K, V> for Arc<(K, V)> {
+    fn new(key: K, value: V) -> Self {
+        Arc::new((key, value))
+    }
+
     fn key(&self) -> &K {
         &self.0
     }
@@ -21,6 +27,10 @@ impl<K, V> Kvp<K, V> for Arc<(K, V)> {
 }
 
 impl<K, V> Kvp<K, V> for Rc<(K, V)> {
+    fn new(key: K, value: V) -> Self {
+        Rc::new((key, value))
+    }
+
     fn key(&self) -> &K {
         &self.0
     }
@@ -37,13 +47,11 @@ pub struct Pair<K, V> {
     value: V,
 }
 
-impl<K, V> Pair<K, V> {
-    pub fn new(key: K, value: V) -> Self {
+impl<K: Clone, V: Clone> Kvp<K, V> for Pair<K, V> {
+    fn new(key: K, value: V) -> Self {
         Self { key, value }
     }
-}
 
-impl<K: Clone, V: Clone> Kvp<K, V> for Pair<K, V> {
     fn key(&self) -> &K {
         &self.key
     }

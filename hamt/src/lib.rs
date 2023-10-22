@@ -8,10 +8,9 @@
 
 extern crate alloc;
 
-#[cfg(not(target_arch = "x86_64"))]
-const _: () = { compile_error!("hamt only supports x86_64") };
-
-// pub mod gc;
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+const _: () =
+    compile_error!("This crate is only compatible with x86_64 and aarch64 architectures.");
 
 pub mod config;
 pub mod map;

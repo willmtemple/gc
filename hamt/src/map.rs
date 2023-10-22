@@ -8,30 +8,30 @@ use core::{
 use crate::{
     config::{DefaultConfig, HamtConfig, Kvp},
     iter::HamtIterator,
-    node::{util::HashCode, Collision},
+    node::{util::HashCode, LeafNode},
 };
 
 pub struct HamtMap<
     K: Eq + Hash,
     V,
-    #[cfg(feature = "std")] HamtHasher: Hasher + Default = std::collections::hash_map::DefaultHasher,
-    #[cfg(not(feature = "std"))] HamtHasher: Hasher + Default,
+    #[cfg(feature = "std")] H: Hasher + Default = std::collections::hash_map::DefaultHasher,
+    #[cfg(not(feature = "std"))] H: Hasher + Default,
     Config: HamtConfig<K, V> = DefaultConfig,
 > {
-    _ph: PhantomData<(K, V, Config, HamtHasher)>,
+    _ph: PhantomData<(K, V, Config, H)>,
     root: Option<Config::NodeStore>,
 }
 
-impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>> Default
-    for HamtMap<K, V, HamtHasher, Config>
+impl<K: Eq + Hash, V, H: Hasher + Default, Config: HamtConfig<K, V>> Default
+    for HamtMap<K, V, H, Config>
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>> Clone
-    for HamtMap<K, V, HamtHasher, Config>
+impl<K: Eq + Hash, V, H: Hasher + Default, Config: HamtConfig<K, V>> Clone
+    for HamtMap<K, V, H, Config>
 {
     fn clone(&self) -> Self {
         Self {
@@ -41,8 +41,7 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>> Cl
     }
 }
 
-impl<K, Q, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>> Index<&Q>
-    for HamtMap<K, V, HamtHasher, Config>
+impl<K, Q, V, H: Hasher + Default, Config: HamtConfig<K, V>> Index<&Q> for HamtMap<K, V, H, Config>
 where
     K: Eq + Hash,
     Q: Borrow<K> + ?Sized,
@@ -54,9 +53,7 @@ where
     }
 }
 
-impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
-    HamtMap<K, V, HamtHasher, Config>
-{
+impl<K: Eq + Hash, V, H: Hasher + Default, Config: HamtConfig<K, V>> HamtMap<K, V, H, Config> {
     pub fn new() -> Self {
         Self {
             _ph: PhantomData,
@@ -67,7 +64,7 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
     /// Get a value from the map for a given key, if it exists.
     pub fn get(&self, key: &K) -> Option<&V> {
         let hash = {
-            let mut hasher = HamtHasher::default();
+            let mut hasher = H::default();
             key.hash(&mut hasher);
             hasher.finish()
         } as HashCode;
@@ -83,7 +80,7 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
     /// Returns a new HAMT with the inserted key-value pair.
     pub fn insert(&self, key: K, value: V) -> Self {
         let hash = {
-            let mut hasher = HamtHasher::default();
+            let mut hasher = H::default();
             key.hash(&mut hasher);
             hasher.finish()
         } as HashCode;
@@ -95,9 +92,7 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
             },
             None => Self {
                 _ph: PhantomData,
-                root: Some(Collision::<K, V, Config>::create_with_pair(
-                    key, value, hash,
-                )),
+                root: Some(LeafNode::<K, V, Config>::create_with_pair(key, value, hash)),
             },
         }
     }
@@ -107,7 +102,7 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
     /// Returns a new HAMT with the given key removed.
     pub fn remove(&self, key: &K) -> Self {
         let hash = {
-            let mut hasher = HamtHasher::default();
+            let mut hasher = H::default();
             key.hash(&mut hasher);
             hasher.finish()
         } as HashCode;
@@ -160,13 +155,18 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
             let spaces = " ".repeat(level * 2);
 
             match node.deref().upgrade() {
+                NodePtr::Leaf(leaf) => {
+                    println!("{}- Leaf (hash: {:#066b}):", spaces, leaf._header.hash);
+                    println!("{}  Key   : {:?}", spaces, leaf.entry.key());
+                    println!("{}  Value : {:?}", spaces, leaf.entry.value());
+                }
                 NodePtr::Collision(col) => {
                     println!("{}- Collision (hash: {:#066b}):", spaces, col._header.hash);
                     for kvp in col.values.iter() {
                         println!("{}  - {:?}: {:?}", spaces, kvp.key(), kvp.value());
                     }
                 }
-                NodePtr::Inner(node) => {
+                NodePtr::Interior(node) => {
                     println!(
                         "{}- Node ({}): {:#066b}",
                         spaces,

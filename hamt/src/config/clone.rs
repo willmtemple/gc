@@ -14,10 +14,6 @@ unsafe impl<K: Eq + Hash + Clone, V: Clone> HamtConfig<K, V> for CloningConfig {
 
     type Kvp = Pair<K, V>;
 
-    fn wrap_kvp(k: K, v: V) -> Self::Kvp {
-        Pair::new(k, v)
-    }
-
     fn allocate<T: HamtNode<K, V, Self> + ?Sized>(
         metadata: <T as Pointee>::Metadata,
         init: impl FnOnce(&mut T),

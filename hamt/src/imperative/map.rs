@@ -13,7 +13,7 @@ pub struct ImperativeHamtMap<
     #[cfg(not(feature = "std"))] HamtHasher: Hasher + Default,
     Config: HamtConfig<K, V> = DefaultConfig,
 > {
-    hamt: Box<HamtMap<K, V, HamtHasher, Config>>,
+    hamt: HamtMap<K, V, HamtHasher, Config>,
 }
 
 impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
@@ -21,12 +21,12 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
 {
     pub fn new() -> Self {
         Self {
-            hamt: Box::new(HamtMap::<K, V, HamtHasher, Config>::new()),
+            hamt: HamtMap::<K, V, HamtHasher, Config>::new(),
         }
     }
 
     pub fn as_persistent(&self) -> HamtMap<K, V, HamtHasher, Config> {
-        (*self.hamt).clone()
+        self.hamt.clone()
     }
 
     pub fn get(&self, k: &K) -> Option<&V> {
@@ -34,12 +34,12 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
     }
 
     pub fn insert(&mut self, k: K, v: V) -> &mut Self {
-        *self.hamt = self.hamt.insert(k, v);
+        self.hamt = self.hamt.insert(k, v);
         self
     }
 
     pub fn remove(&mut self, k: &K) -> &mut Self {
-        *self.hamt = self.hamt.remove(k);
+        self.hamt = self.hamt.remove(k);
         self
     }
 }

@@ -14,10 +14,6 @@ unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for RcGlobal {
 
     type Kvp = Rc<(K, V)>;
 
-    fn wrap_kvp(k: K, v: V) -> Self::Kvp {
-        Rc::new((k, v))
-    }
-
     fn allocate<T: HamtNode<K, V, Self> + ?Sized>(
         metadata: <T as Pointee>::Metadata,
         init: impl FnOnce(&mut T),

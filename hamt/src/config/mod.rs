@@ -31,9 +31,6 @@ pub unsafe trait HamtConfig<K: Eq + Hash, V>: Copy {
     // The type of a key-value pair stored in the HAMT.
     type Kvp: Kvp<K, V>;
 
-    /// Wraps a key-value pair.
-    fn wrap_kvp(k: K, v: V) -> Self::Kvp;
-
     /// Allocate a region of memory for a node of type `T` with the given `metadata`.
     ///
     /// # Safety

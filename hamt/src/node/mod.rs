@@ -1,8 +1,11 @@
 mod collision;
-pub use collision::Collision;
+pub use collision::CollisionNode;
 
 mod interior;
-pub use interior::InnerNode;
+pub use interior::InteriorNode;
+
+mod leaf;
+pub use leaf::LeafNode;
 
 use core::hash::Hash;
 use core::marker::PhantomData;
@@ -56,7 +59,8 @@ pub trait HamtNode<K: Eq + Hash, V, Config: HamtConfig<K, V>> {
 #[non_exhaustive]
 #[derive(Eq, PartialEq)]
 pub enum NodeType {
-    Inner = 2,
+    Leaf = 1,
+    Interior = 2,
     Collision = 3,
 
     _Header = 0,
@@ -68,7 +72,8 @@ impl NodeType {
 
         match n {
             0 => Self::_Header,
-            2 => Self::Inner,
+            1 => Self::Leaf,
+            2 => Self::Interior,
             3 => Self::Collision,
             _ => panic!("Unknown node type 0b{:03b}", n),
         }
@@ -100,17 +105,15 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
 
     pub(crate) unsafe fn new<T: HamtNode<K, V, Config> + ?Sized>(
         level: usize,
-        metadata: usize,
+        size: usize,
         hash: HashCode,
     ) -> Self {
-        debug_assert!(metadata <= Self::SIZE_MASK);
+        debug_assert!(size <= Self::SIZE_MASK);
         debug_assert!(level <= 0b1111);
 
         Self {
             _ph: PhantomData,
-            packed: ((T::TAG as usize) << 61)
-                | ((level & 0b1111) << 57)
-                | (metadata & !Self::TAG_MASK),
+            packed: ((T::TAG as usize) << 61) | ((level & 0b1111) << 57) | (size & !Self::TAG_MASK),
             hash,
         }
     }
@@ -123,28 +126,31 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
         (self.packed & Self::LEVEL_MASK) >> 57
     }
 
-    fn metadata(&self) -> usize {
+    fn size(&self) -> usize {
         self.packed & Self::SIZE_MASK
     }
 
     pub fn get(&self, k: &K, hash: HashCode) -> Option<&Config::Kvp> {
         match self.upgrade() {
+            NodePtr::Leaf(node) => node.get(k),
             NodePtr::Collision(node) => node.get(k, hash),
-            NodePtr::Inner(node) => node.get(k, hash),
+            NodePtr::Interior(node) => node.get(k, hash),
         }
     }
 
     pub fn insert(&self, k: K, v: V, hash: HashCode) -> Config::NodeStore {
         match self.upgrade() {
+            NodePtr::Leaf(node) => node.insert(k, v, hash),
             NodePtr::Collision(node) => node.insert(k, v, hash),
-            NodePtr::Inner(node) => node.insert(k, v, hash),
+            NodePtr::Interior(node) => node.insert(k, v, hash),
         }
     }
 
     pub fn remove(&self, k: &K, hash: HashCode) -> Option<Config::NodeStore> {
         match self.upgrade() {
+            NodePtr::Leaf(node) => node.remove(k),
             NodePtr::Collision(node) => node.remove(k, hash),
-            NodePtr::Inner(node) => node.remove(k, hash),
+            NodePtr::Interior(node) => node.remove(k, hash),
         }
     }
 }
@@ -152,14 +158,17 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Drop for NodeHeader<K, V, Config> {
     fn drop(&mut self) {
         match self.upgrade_mut() {
+            NodePtrMut::Leaf(l) => {
+                unsafe { core::ptr::drop_in_place(&mut l.entry) };
+            }
             NodePtrMut::Collision(l) => {
                 for kvp in l.values.iter_mut() {
-                    core::mem::drop(unsafe { core::ptr::read(kvp) });
+                    unsafe { core::ptr::drop_in_place(kvp) };
                 }
             }
-            NodePtrMut::Inner(i) => {
+            NodePtrMut::Interior(i) => {
                 for child in i.children.iter_mut() {
-                    core::mem::drop(unsafe { core::ptr::read(child) });
+                    unsafe { core::ptr::drop_in_place(child) };
                 }
             }
         }
@@ -167,23 +176,28 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Drop for NodeHeader<K, V, Config
 }
 
 pub enum NodePtr<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> {
-    Collision(&'a Collision<K, V, Config>),
-    Inner(&'a InnerNode<K, V, Config>),
+    Leaf(&'a LeafNode<K, V, Config>),
+    Collision(&'a CollisionNode<K, V, Config>),
+    Interior(&'a InteriorNode<K, V, Config>),
 }
 
 pub enum NodePtrMut<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> {
-    Collision(&'a mut Collision<K, V, Config>),
-    Inner(&'a mut InnerNode<K, V, Config>),
+    Leaf(&'a mut LeafNode<K, V, Config>),
+    Collision(&'a mut CollisionNode<K, V, Config>),
+    Interior(&'a mut InteriorNode<K, V, Config>),
 }
 
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
     pub fn upgrade(&self) -> NodePtr<K, V, Config> {
         match self.tag() {
-            NodeType::Collision => NodePtr::Collision(unsafe {
-                &*core::ptr::from_raw_parts(self as *const _ as *const (), self.metadata())
+            NodeType::Leaf => NodePtr::Leaf(unsafe {
+                &*core::ptr::from_raw_parts(self as *const _ as *const (), ())
             }),
-            NodeType::Inner => NodePtr::Inner(unsafe {
-                &*(core::ptr::from_raw_parts(self as *const _ as *const (), self.metadata()))
+            NodeType::Collision => NodePtr::Collision(unsafe {
+                &*core::ptr::from_raw_parts(self as *const _ as *const (), self.size())
+            }),
+            NodeType::Interior => NodePtr::Interior(unsafe {
+                &*(core::ptr::from_raw_parts(self as *const _ as *const (), self.size()))
             }),
             NodeType::_Header => unreachable!(),
         }
@@ -191,11 +205,14 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
 
     fn upgrade_mut(&mut self) -> NodePtrMut<K, V, Config> {
         match self.tag() {
-            NodeType::Collision => NodePtrMut::Collision(unsafe {
-                &mut *core::ptr::from_raw_parts_mut(self as *mut _ as *mut (), self.metadata())
+            NodeType::Leaf => NodePtrMut::Leaf(unsafe {
+                &mut *core::ptr::from_raw_parts_mut(self as *mut _ as *mut (), ())
             }),
-            NodeType::Inner => NodePtrMut::Inner(unsafe {
-                &mut *(core::ptr::from_raw_parts_mut(self as *mut _ as *mut (), self.metadata()))
+            NodeType::Collision => NodePtrMut::Collision(unsafe {
+                &mut *core::ptr::from_raw_parts_mut(self as *mut _ as *mut (), self.size())
+            }),
+            NodeType::Interior => NodePtrMut::Interior(unsafe {
+                &mut *(core::ptr::from_raw_parts_mut(self as *mut _ as *mut (), self.size()))
             }),
             NodeType::_Header => unreachable!(),
         }

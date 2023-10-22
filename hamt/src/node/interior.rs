@@ -4,7 +4,7 @@ use crate::{
     config::HamtConfig,
     node::{
         util::{hash_bits_for_level, BITMAP_INDEX_BITS, MAX_LEVEL},
-        Collision,
+        LeafNode,
     },
 };
 
@@ -16,13 +16,13 @@ use super::{
 use core::ptr::write;
 
 #[repr(C)]
-pub struct InnerNode<K: Eq + Hash, V, Config: HamtConfig<K, V>> {
+pub struct InteriorNode<K: Eq + Hash, V, Config: HamtConfig<K, V>> {
     pub(crate) _header: NodeHeader<K, V, Config>,
     pub(crate) bitmap: Bitmap,
     pub(crate) children: [Config::NodeStore],
 }
 
-impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
     fn level(&self) -> usize {
         self._header.level()
     }
@@ -67,9 +67,9 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
             ((leading_same_bits - 4) / (BITMAP_INDEX_BITS as u32)) as usize + 1
         };
 
-        let regresses = leading_same_bits != 64 && regression_level < self.level();
+        let should_reparent = leading_same_bits != 64 && regression_level < self.level();
 
-        if regresses {
+        if should_reparent {
             // eprintln!(
             //     "Node at level {} insertion regresses to level {} with {} leading same bits",
             //     self.level(),
@@ -77,49 +77,24 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
             //     leading_same_bits
             // );
 
-            let new_bits_for_next_level = hash_bits_for_level(hash, regression_level);
-            let self_bits_for_next_level = hash_bits_for_level(self.hash(), regression_level);
-            let bitmap = (1 << new_bits_for_next_level) | (1 << self_bits_for_next_level);
-
-            return Config::allocate::<Self>(2, |inner| unsafe {
-                write(
-                    &mut inner._header,
-                    NodeHeader::new::<Self>(regression_level, 2, hash),
-                );
-
-                inner.bitmap = bitmap;
-
-                inner.bitmap = bitmap;
-
-                let new_node = Collision::<K, V, Config>::create_with_pair(key, value, hash);
-                let this_node = Config::upgrade_ref(self);
-
-                match new_bits_for_next_level.cmp(&self_bits_for_next_level) {
-                    Ordering::Less => {
-                        write(&mut inner.children[0], new_node);
-                        write(&mut inner.children[1], this_node);
-                    }
-                    Ordering::Greater => {
-                        write(&mut inner.children[0], this_node);
-                        write(&mut inner.children[1], new_node);
-                    }
-                    Ordering::Equal => unreachable!(),
-                }
-            });
-        }
-
-        let index = hash_bits_for_level(hash, self.level());
-
-        // eprintln!("Index: {}", index);
-
-        let occupied = ((self.bitmap >> index) & 1) == 1;
-        let masked_bitmap = ((1 << index) - 1) & self.bitmap;
-        let pop = masked_bitmap.count_ones() as usize;
-
-        if occupied {
-            self.insert_occupied(key, value, hash, pop)
+            Self::reparent(
+                unsafe { Config::upgrade_ref(self) },
+                LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
+            )
         } else {
-            self.insert_vacant(key, value, hash, index, pop)
+            let index = hash_bits_for_level(hash, self.level());
+
+            // eprintln!("Index: {}", index);
+
+            let occupied = ((self.bitmap >> index) & 1) == 1;
+            let masked_bitmap = ((1 << index) - 1) & self.bitmap;
+            let pop = masked_bitmap.count_ones() as usize;
+
+            if occupied {
+                self.insert_occupied(key, value, hash, pop)
+            } else {
+                self.insert_vacant(key, value, hash, index, pop)
+            }
         }
     }
 
@@ -134,7 +109,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
         // Allocate a new InnerNode with a new bitmap with the `index`th bit set,
         // and with a new single-value leaf node allocated with (k, v) at index `pop`.
 
-        let new_leaf = Collision::<K, V, Config>::create_with_pair(key, value, hash);
+        let new_leaf = LeafNode::<K, V, Config>::create_with_pair(key, value, hash);
 
         // eprintln!("Bitmap was : {:#066b}", self.bitmap);
         let new_bitmap = self.bitmap | (1 << index);
@@ -261,10 +236,52 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InnerNode<K, V, Config> {
             }
         }
     }
+
+    pub fn reparent(left: Config::NodeStore, right: Config::NodeStore) -> Config::NodeStore {
+        let leading_same_bits = (left.hash ^ right.hash).leading_zeros();
+
+        let next_level = if leading_same_bits < 4 {
+            0
+        } else {
+            ((leading_same_bits - 4) / (BITMAP_INDEX_BITS as u32)) as usize + 1
+        };
+        let left_bits_for_next_level = hash_bits_for_level(left.hash, next_level);
+        let right_bits_for_next_level = hash_bits_for_level(right.hash, next_level);
+        let bitmap = (1 << left_bits_for_next_level) | (1 << right_bits_for_next_level);
+
+        eprintln!(
+            "Creating inner node at level {} ({} leading same bits)",
+            next_level, leading_same_bits
+        );
+
+        debug_assert!(next_level < MAX_LEVEL);
+
+        Config::allocate::<InteriorNode<K, V, Config>>(2, move |inner| unsafe {
+            write(
+                &mut inner._header,
+                NodeHeader::new::<InteriorNode<K, V, Config>>(next_level, 2, left.hash),
+            );
+            inner.bitmap = bitmap;
+
+            match left_bits_for_next_level.cmp(&right_bits_for_next_level) {
+                Ordering::Less => {
+                    write(&mut inner.children[0], left);
+                    write(&mut inner.children[1], right);
+                }
+                Ordering::Greater => {
+                    write(&mut inner.children[0], right);
+                    write(&mut inner.children[1], left);
+                }
+                Ordering::Equal => unreachable!(),
+            }
+        })
+    }
 }
 
-impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtNode<K, V, Config> for InnerNode<K, V, Config> {
-    const TAG: NodeType = NodeType::Inner;
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtNode<K, V, Config>
+    for InteriorNode<K, V, Config>
+{
+    const TAG: NodeType = NodeType::Interior;
 
     fn header(&self) -> &NodeHeader<K, V, Config> {
         &self._header
