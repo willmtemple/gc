@@ -66,6 +66,7 @@ fn hamt_vec() {
     hv = hv.push(0);
 
     assert_eq!(hv.len(), 1);
+    assert_eq!(hv[0], 0);
 
     hv.push(1);
 
@@ -103,8 +104,8 @@ fn hv_iter() {
         hv = hv.push(*i);
     }
 
-    for (idx, v) in hv.iter().enumerate() {
-        assert_eq!(*v, idx as i32);
+    for i in &hv {
+        assert_eq!(*i, v[*i as usize]);
     }
 
     let slice = hv.slice(1..5);
@@ -115,7 +116,7 @@ fn hv_iter() {
     assert_eq!(slice[2], 3);
     assert_eq!(slice[3], 4);
 
-    for (idx, v) in slice.iter().enumerate() {
+    for (idx, v) in (&slice).into_iter().enumerate() {
         assert_eq!(*v, idx as i32 + 1);
     }
 

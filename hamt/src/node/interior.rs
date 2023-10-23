@@ -33,11 +33,6 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
 
     pub fn get(&self, k: &K, hash: HashCode) -> Option<&Config::Kvp> {
         debug_assert!(self.level() <= MAX_LEVEL);
-        // eprintln!(
-        //     "Seeking hash {:#066b} in inner node at level {}",
-        //     hash,
-        //     self.level()
-        // );
         let index = hash_bits_for_level(hash, self.level());
 
         let occupied = ((self.bitmap >> index) & 1) == 1;
@@ -56,11 +51,6 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
 
         let leading_same_bits = (self.hash() ^ hash).leading_zeros();
 
-        // eprintln!(
-        //     "Inserting hash {:#066b} into inner node with bitmap {:#066b} and {} leading same bits",
-        //     hash, self.bitmap, leading_same_bits
-        // );
-
         let regression_level = if leading_same_bits < 4 {
             0
         } else {
@@ -70,21 +60,12 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
         let should_reparent = leading_same_bits != 64 && regression_level < self.level();
 
         if should_reparent {
-            // eprintln!(
-            //     "Node at level {} insertion regresses to level {} with {} leading same bits",
-            //     self.level(),
-            //     regression_level,
-            //     leading_same_bits
-            // );
-
             Self::reparent(
                 Config::upgrade_ref(self),
                 LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
             )
         } else {
             let index = hash_bits_for_level(hash, self.level());
-
-            // eprintln!("Index: {}", index);
 
             let occupied = ((self.bitmap >> index) & 1) == 1;
             let masked_bitmap = ((1 << index) - 1) & self.bitmap;
@@ -111,9 +92,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
 
         let new_leaf = LeafNode::<K, V, Config>::create_with_pair(key, value, hash);
 
-        // eprintln!("Bitmap was : {:#066b}", self.bitmap);
         let new_bitmap = self.bitmap | (1 << index);
-        // eprintln!("Bitmap next: {:#066b}, from index {}", new_bitmap, index);
 
         Config::allocate::<Self>(self.children.len() + 1, move |inner| unsafe {
             write(
@@ -248,11 +227,6 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
         let left_bits_for_next_level = hash_bits_for_level(left.hash, next_level);
         let right_bits_for_next_level = hash_bits_for_level(right.hash, next_level);
         let bitmap = (1 << left_bits_for_next_level) | (1 << right_bits_for_next_level);
-
-        eprintln!(
-            "Creating inner node at level {} ({} leading same bits)",
-            next_level, leading_same_bits
-        );
 
         debug_assert!(next_level < MAX_LEVEL);
 

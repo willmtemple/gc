@@ -5,7 +5,7 @@ pub mod arc;
 pub use arc::ArcConfig;
 
 pub mod rc;
-pub use rc::RcGlobal;
+pub use rc::RcConfig;
 
 pub mod clone;
 pub use clone::CloningConfig;

@@ -205,8 +205,6 @@ impl<'a, K: Eq + Hash, V, Config: HamtConfig<K, V>> Iterator for HamtIterator<'a
         let kvp = self.find_bottom();
         let (k, v) = kvp.key_value();
 
-        // eprintln!("Ret : {:p}, {:p}", k, v);
-
         self.shift_cursor();
 
         Some(unsafe {
