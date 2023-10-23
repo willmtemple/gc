@@ -4,7 +4,8 @@ use core::{
 };
 
 use crate::{
-    config::{DefaultConfig, HamtConfig},
+    config::{DefaultConfig, HamtConfig, Kvp},
+    iter::HamtIterator,
     node::{util::HashCode, LeafNode},
 };
 
@@ -16,6 +17,9 @@ pub struct HamtSet<
     Config: HamtConfig<K, ()> = DefaultConfig,
 > {
     _ph: PhantomData<H>,
+    // TODO/wtemple - size cannot be tracked as there is no way to know if an insert is a duplicate currently
+    // or if a remove actually removed anything
+    // size: usize,
     root: Option<Config::NodeStore>,
 }
 
@@ -30,7 +34,16 @@ impl<K: Eq + Hash> HamtSet<K> {
 }
 
 impl<K: Eq + Hash, H: Hasher + Default, Config: HamtConfig<K, ()>> HamtSet<K, H, Config> {
-    pub fn has(&self, k: &K) -> bool {
+    // TODO/wtemple - see abovea in definition of size: usize
+    // pub fn len(&self) -> usize {
+    //     self.size
+    // }
+
+    // pub fn is_empty(&self) -> bool {
+    //     self.size == 0
+    // }
+
+    pub fn contains(&self, k: &K) -> bool {
         let hash = {
             let mut hasher = H::default();
             k.hash(&mut hasher);
@@ -41,6 +54,20 @@ impl<K: Eq + Hash, H: Hasher + Default, Config: HamtConfig<K, ()>> HamtSet<K, H,
             .as_ref()
             .and_then(|root| root.get(k, hash))
             .is_some()
+    }
+
+    pub fn get(&self, k: impl AsRef<K>) -> Option<&K> {
+        let k = k.as_ref();
+        let hash = {
+            let mut hasher = H::default();
+            k.hash(&mut hasher);
+            hasher.finish()
+        } as HashCode;
+
+        self.root
+            .as_ref()
+            .and_then(|root| root.get(k, hash))
+            .map(|v| v.key())
     }
 
     pub fn insert(&self, k: K) -> Self {
@@ -80,4 +107,24 @@ impl<K: Eq + Hash, H: Hasher + Default, Config: HamtConfig<K, ()>> HamtSet<K, H,
             },
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &K> {
+        HamtIterator::<K, (), Config>::new(self.root.clone()).map(|v| v.0)
+    }
+
+    // TODO/wtemple
+    // pub fn retain(&self, f: impl Fn(&K) -> bool) -> Self;
+
+    // TODO/wtemple
+    // - Do we need to constrain to Self or can we allow any HamtSet<K, V, Config>?
+    // pub fn difference(&self, other: &Self) -> Self;
+
+    // TODO/wtemple
+    // pub fn symmetric_difference(&self, other: &Self) -> Self;
+
+    // TODO/wtemple
+    // pub fn intersection(&self, other: &Self) -> Self;
+
+    // TODO/wtemple
+    // pub fn union(&self, other: &Self) -> Self;
 }

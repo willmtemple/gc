@@ -21,7 +21,7 @@ unsafe impl<K: Eq + Hash, V> HamtConfig<K, V> for ArcConfig {
         common::allocate_refcounted(metadata, init, Global)
     }
 
-    unsafe fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore {
+    fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore {
         common::upgrade_refcounted(ptr, Global)
     }
 }

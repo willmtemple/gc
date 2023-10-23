@@ -141,53 +141,6 @@ impl<V, Config: HamtConfig<(), V>> HamtVec<V, Config> {
             vec: self.clone(),
         }
     }
-
-    #[cfg(feature = "std")]
-    pub fn print(&self)
-    where
-        V: core::fmt::Debug,
-    {
-        use super::node::NodePtr;
-        use core::hash::Hash;
-
-        if self.root.is_none() {
-            println!("Empty HAMT.");
-            return;
-        }
-
-        print_node::<(), V, Config>(self.root.as_ref().unwrap(), 0);
-
-        fn print_node<
-            K: Eq + Hash + core::fmt::Debug,
-            V: core::fmt::Debug,
-            Alloc: HamtConfig<K, V>,
-        >(
-            node: &Alloc::NodeStore,
-            level: usize,
-        ) {
-            let spaces = " ".repeat(level * 2);
-
-            match node.deref().upgrade() {
-                NodePtr::Leaf(leaf) => {
-                    println!("{}- Leaf (hash: {:#066b}):", spaces, leaf._header.hash);
-                    println!("{}  Key   : {:?}", spaces, leaf.entry.key());
-                    println!("{}  Value : {:?}", spaces, leaf.entry.value());
-                }
-                NodePtr::Collision(_) => unreachable!(),
-                NodePtr::Interior(node) => {
-                    println!(
-                        "{}- Node ({}): {:#066b}",
-                        spaces,
-                        node._header.level(),
-                        node.bitmap
-                    );
-                    for child in node.children.iter() {
-                        print_node::<K, V, Alloc>(child, level + 1);
-                    }
-                }
-            }
-        }
-    }
 }
 
 impl<V, Config: HamtConfig<(), V>> Index<usize> for HamtVec<V, Config> {

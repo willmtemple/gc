@@ -78,7 +78,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
             // );
 
             Self::reparent(
-                unsafe { Config::upgrade_ref(self) },
+                Config::upgrade_ref(self),
                 LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
             )
         } else {
@@ -167,7 +167,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
 
         if !occupied {
             // The key is not in the map.
-            return Some(unsafe { Config::upgrade_ref(self) });
+            return Some(Config::upgrade_ref(self));
         }
 
         let masked_bitmap = ((1 << index) - 1) & self.bitmap;
@@ -180,7 +180,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
         if let Some(next) = next {
             if core::ptr::eq(&*next, cur_ptr) {
                 // The child was not removed.
-                return Some(unsafe { Config::upgrade_ref(self) });
+                return Some(Config::upgrade_ref(self));
             }
 
             // The child was modified. We have a new pointer that we want to replace our current pointer with, but the

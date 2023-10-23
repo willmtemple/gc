@@ -40,7 +40,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
             self.add_pair(key, value)
         } else {
             InteriorNode::<K, V, Config>::reparent(
-                unsafe { Config::upgrade_ref(self) },
+                Config::upgrade_ref(self),
                 LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
             )
         }
@@ -49,7 +49,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
     pub fn remove(&self, key: &K, hash: HashCode) -> Option<Config::NodeStore> {
         if hash != self.hash() {
             // The key is not in the map.
-            return Some(unsafe { Config::upgrade_ref(self) });
+            return Some(Config::upgrade_ref(self));
         }
 
         let cur_value = self
@@ -70,7 +70,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
             }
         } else {
             // The key is not in the collision node.
-            Some(unsafe { Config::upgrade_ref(self) })
+            Some(Config::upgrade_ref(self))
         }
     }
 

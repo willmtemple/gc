@@ -33,7 +33,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> LeafNode<K, V, Config> {
         if self.entry.key() == key {
             None
         } else {
-            Some(unsafe { Config::upgrade_ref(self) })
+            Some(Config::upgrade_ref(self))
         }
     }
 
@@ -55,7 +55,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> LeafNode<K, V, Config> {
             }
         } else {
             InteriorNode::<K, V, Config>::reparent(
-                unsafe { Config::upgrade_ref(self) },
+                Config::upgrade_ref(self),
                 LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
             )
         }

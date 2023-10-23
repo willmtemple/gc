@@ -54,5 +54,5 @@ pub unsafe trait HamtConfig<K: Eq + Hash, V>: Copy {
     ///
     /// This should return a NEW pointer. In case of refcounting or other memory management schemes, treat
     /// this as if it creates a NEW, ADDITIONAL pointer.
-    unsafe fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore;
+    fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore;
 }

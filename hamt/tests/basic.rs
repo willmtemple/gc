@@ -1,7 +1,7 @@
 use hamt::{config::CloningConfig, HamtMap, HamtVec};
 
 #[test]
-fn print_trees() {
+fn hm_test() {
     let hamt_mt = HamtMap::<u64, u64>::new();
 
     assert!(hamt_mt.get(&0).is_none());
@@ -36,16 +36,11 @@ fn print_trees() {
         assert_eq!(hamt.get(&i), Some(&(i + 1)));
     }
 
-    hamts[hamts.len() - 1].print();
-    hamts[hamts.len() - 2].print();
-
     for (hamt_idx, hamt) in hamts.iter().enumerate() {
         for i in 0..=hamt_idx {
             assert_eq!(hamt.get(&(i as u64)), Some(&(i as u64 + 1)))
         }
     }
-
-    hamts[hamts.len() - 1].print();
 
     let mut last_hamt = hamts[hamts.len() - 1].clone();
 
@@ -54,8 +49,6 @@ fn print_trees() {
 
         assert_eq!(last_hamt.get(&(i * 2)), None);
     }
-
-    last_hamt.print();
 
     for idx in 0..HAMTS {
         if idx % 2 == 0 {
@@ -80,15 +73,11 @@ fn hamt_vec() {
 
     hv = hv.push(1);
 
-    hv.print();
-
     assert_eq!(hv.len(), 2);
 
     for i in 2..64 {
         hv = hv.push(i);
     }
-
-    hv.print();
 
     assert_eq!(hv.len(), 64);
 
@@ -98,13 +87,11 @@ fn hamt_vec() {
         hv = hv.push(i);
     }
 
-    hv.print();
-
     assert_eq!(hv.len(), 128);
 
     hv = hv.push(128);
 
-    hv.print()
+    assert_eq!(hv.len(), 129);
 }
 
 #[test]
@@ -113,12 +100,10 @@ fn hv_iter() {
     let mut hv = HamtVec::<i32, CloningConfig>::new();
 
     for i in v.iter() {
-        hv.print();
         hv = hv.push(*i);
     }
 
     for (idx, v) in hv.iter().enumerate() {
-        eprintln!("Checking index: {} with value {}", idx, v);
         assert_eq!(*v, idx as i32);
     }
 
@@ -130,10 +115,7 @@ fn hv_iter() {
     assert_eq!(slice[2], 3);
     assert_eq!(slice[3], 4);
 
-    eprintln!("Starting slice iter.");
-
     for (idx, v) in slice.iter().enumerate() {
-        eprintln!("Checking index: {} with value {}", idx, v);
         assert_eq!(*v, idx as i32 + 1);
     }
 

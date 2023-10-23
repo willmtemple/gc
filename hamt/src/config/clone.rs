@@ -21,7 +21,7 @@ unsafe impl<K: Eq + Hash + Clone, V: Clone> HamtConfig<K, V> for CloningConfig {
         common::allocate_refcounted(metadata, init, Global)
     }
 
-    unsafe fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore {
+    fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore {
         common::upgrade_refcounted(ptr, Global)
     }
 }
