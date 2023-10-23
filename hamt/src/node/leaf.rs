@@ -29,40 +29,41 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> LeafNode<K, V, Config> {
         }
     }
 
-    pub fn remove(&self, key: &K) -> Option<Config::NodeStore> {
+    pub fn remove(&self, cfg: &Config, key: &K) -> Option<Config::NodeStore> {
         if self.entry.key() == key {
             None
         } else {
-            Some(Config::upgrade_ref(self))
+            Some(cfg.upgrade_ref(self))
         }
     }
 
-    pub fn insert(&self, key: K, value: V, hash: HashCode) -> Config::NodeStore {
+    pub fn insert(&self, cfg: &Config, key: K, value: V, hash: HashCode) -> Config::NodeStore {
         if hash == self.hash() {
             if &key == self.entry.key() {
                 // Hard collision, just return a new leaf node.
-                Self::create_with_pair(key, value, hash)
+                Self::create_with_pair(cfg, key, value, hash)
             } else {
                 // Soft collision, create a new collision node.
-                Config::allocate::<CollisionNode<K, V, Config>>(2, |collision| unsafe {
+                cfg.allocate::<CollisionNode<K, V, Config>>(2, |collision| unsafe {
                     write(
                         &mut collision._header,
                         NodeHeader::new::<CollisionNode<K, V, Config>>(0, 2, hash),
                     );
                     write(&mut collision.values[0], self.entry.clone());
-                    write(&mut collision.values[1], Config::Kvp::new(key, value));
+                    write(&mut collision.values[1], cfg.new_kvp(key, value));
                 })
             }
         } else {
             InteriorNode::<K, V, Config>::reparent(
-                Config::upgrade_ref(self),
-                LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
+                cfg,
+                cfg.upgrade_ref(self),
+                LeafNode::<K, V, Config>::create_with_pair(cfg, key, value, hash),
             )
         }
     }
 
-    pub fn create_with_pair(key: K, value: V, hash: HashCode) -> Config::NodeStore {
-        Config::allocate::<Self>((), |collision| unsafe {
+    pub fn create_with_pair(cfg: &Config, key: K, value: V, hash: HashCode) -> Config::NodeStore {
+        cfg.allocate::<Self>((), |collision| unsafe {
             write(
                 &mut collision._header,
                 NodeHeader::new::<Self>(MAX_LEVEL, 1, hash),
@@ -74,7 +75,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> LeafNode<K, V, Config> {
                     == 0
             );
 
-            write(&mut collision.entry, Config::Kvp::new(key, value));
+            write(&mut collision.entry, cfg.new_kvp(key, value));
         })
     }
 }

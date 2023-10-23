@@ -11,33 +11,34 @@ use crate::{node::HamtNode, HamtConfig};
 
 /// # Safety
 ///
-/// Don't screw this up. Only meant for internal use.
-pub unsafe trait RefCountedPtr<K: Eq + Hash, V, Config: HamtConfig<K, V>, A: Allocator> {
+/// Don't screw this up. Only for internal use.
+pub unsafe trait RefCountedPtr<K: Eq + Hash, V, Config: HamtConfig<K, V>> {
     type UninitSlice;
-    fn new_zeroed_slice_in(len: usize, alloc: A) -> Self::UninitSlice;
+
+    fn new_zeroed_slice_in(len: usize, alloc: Config::Allocator) -> Self::UninitSlice;
 
     fn into_ptr(this: Self::UninitSlice) -> *const ();
 
-    fn from_ptr(ptr: *const NodeHeader<K, V, Config>, a: A) -> Self;
+    fn from_ptr(ptr: *const NodeHeader<K, V, Config>, a: Config::Allocator) -> Self;
 
     fn increment_strong_count(ptr: *const NodeHeader<K, V, Config>);
 }
 
-unsafe impl<K: Eq + Hash, V, Config: HamtConfig<K, V>, A: Allocator> RefCountedPtr<K, V, Config, A>
-    for Arc<NodeHeader<K, V, Config>, A>
+unsafe impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> RefCountedPtr<K, V, Config>
+    for Arc<NodeHeader<K, V, Config>, Config::Allocator>
 {
-    type UninitSlice = Arc<[MaybeUninit<usize>], A>;
+    type UninitSlice = Arc<[MaybeUninit<usize>], Config::Allocator>;
 
-    fn new_zeroed_slice_in(len: usize, alloc: A) -> Self::UninitSlice {
-        Arc::<[usize], A>::new_zeroed_slice_in(len, alloc)
+    fn new_zeroed_slice_in(len: usize, alloc: Config::Allocator) -> Self::UninitSlice {
+        Arc::<[usize], Config::Allocator>::new_zeroed_slice_in(len, alloc)
     }
 
     fn into_ptr(this: Self::UninitSlice) -> *const () {
         Arc::into_raw(this) as *const ()
     }
 
-    fn from_ptr(ptr: *const NodeHeader<K, V, Config>, a: A) -> Self {
-        unsafe { Arc::<NodeHeader<K, V, Config>, A>::from_raw_in(ptr, a) }
+    fn from_ptr(ptr: *const NodeHeader<K, V, Config>, a: Config::Allocator) -> Self {
+        unsafe { Arc::<NodeHeader<K, V, Config>, Config::Allocator>::from_raw_in(ptr, a) }
     }
 
     fn increment_strong_count(ptr: *const NodeHeader<K, V, Config>) {
@@ -45,21 +46,21 @@ unsafe impl<K: Eq + Hash, V, Config: HamtConfig<K, V>, A: Allocator> RefCountedP
     }
 }
 
-unsafe impl<K: Eq + Hash, V, Config: HamtConfig<K, V>, A: Allocator> RefCountedPtr<K, V, Config, A>
-    for Rc<NodeHeader<K, V, Config>, A>
+unsafe impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> RefCountedPtr<K, V, Config>
+    for Rc<NodeHeader<K, V, Config>, Config::Allocator>
 {
-    type UninitSlice = Rc<[MaybeUninit<usize>], A>;
+    type UninitSlice = Rc<[MaybeUninit<usize>], Config::Allocator>;
 
-    fn new_zeroed_slice_in(len: usize, alloc: A) -> Self::UninitSlice {
-        Rc::<[usize], A>::new_zeroed_slice_in(len, alloc)
+    fn new_zeroed_slice_in(len: usize, alloc: Config::Allocator) -> Self::UninitSlice {
+        Rc::<[usize], Config::Allocator>::new_zeroed_slice_in(len, alloc)
     }
 
     fn into_ptr(this: Self::UninitSlice) -> *const () {
         Rc::into_raw(this) as *const ()
     }
 
-    fn from_ptr(ptr: *const NodeHeader<K, V, Config>, a: A) -> Self {
-        unsafe { Rc::<NodeHeader<K, V, Config>, A>::from_raw_in(ptr, a) }
+    fn from_ptr(ptr: *const NodeHeader<K, V, Config>, a: Config::Allocator) -> Self {
+        unsafe { Rc::<NodeHeader<K, V, Config>, Config::Allocator>::from_raw_in(ptr, a) }
     }
 
     fn increment_strong_count(ptr: *const NodeHeader<K, V, Config>) {
@@ -72,12 +73,11 @@ pub fn allocate_refcounted<
     V,
     Config: HamtConfig<K, V>,
     T: HamtNode<K, V, Config> + ?Sized,
-    A: Allocator + Clone,
-    Ptr: RefCountedPtr<K, V, Config, A>,
+    Ptr: RefCountedPtr<K, V, Config>,
 >(
+    allocator: Config::Allocator,
     metadata: <T as Pointee>::Metadata,
     init: impl FnOnce(&mut T),
-    allocator: A,
 ) -> Ptr {
     let layout = unsafe { Layout::for_value_raw(core::ptr::from_raw_parts::<T>(null(), metadata)) };
 
@@ -122,11 +122,10 @@ pub fn upgrade_refcounted<
     V,
     Config: HamtConfig<K, V>,
     T: HamtNode<K, V, Config> + ?Sized,
-    A: Allocator + Clone,
-    Ptr: RefCountedPtr<K, V, Config, A>,
+    Ptr: RefCountedPtr<K, V, Config>,
 >(
+    allocator: Config::Allocator,
     ptr: &T,
-    allocator: A,
 ) -> Ptr {
     let raw = ptr.header() as *const _ as *const NodeHeader<K, V, Config>;
     Ptr::increment_strong_count(raw);

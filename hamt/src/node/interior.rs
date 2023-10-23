@@ -46,7 +46,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
         }
     }
 
-    pub fn insert(&self, key: K, value: V, hash: HashCode) -> Config::NodeStore {
+    pub fn insert(&self, cfg: &Config, key: K, value: V, hash: HashCode) -> Config::NodeStore {
         debug_assert!(self.level() <= MAX_LEVEL);
 
         let leading_same_bits = (self.hash() ^ hash).leading_zeros();
@@ -61,8 +61,9 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
 
         if should_reparent {
             Self::reparent(
-                Config::upgrade_ref(self),
-                LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
+                cfg,
+                cfg.upgrade_ref(self),
+                LeafNode::<K, V, Config>::create_with_pair(cfg, key, value, hash),
             )
         } else {
             let index = hash_bits_for_level(hash, self.level());
@@ -72,15 +73,16 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
             let pop = masked_bitmap.count_ones() as usize;
 
             if occupied {
-                self.insert_occupied(key, value, hash, pop)
+                self.insert_occupied(cfg, key, value, hash, pop)
             } else {
-                self.insert_vacant(key, value, hash, index, pop)
+                self.insert_vacant(cfg, key, value, hash, index, pop)
             }
         }
     }
 
     fn insert_vacant(
         &self,
+        cfg: &Config,
         key: K,
         value: V,
         hash: HashCode,
@@ -90,11 +92,11 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
         // Allocate a new InnerNode with a new bitmap with the `index`th bit set,
         // and with a new single-value leaf node allocated with (k, v) at index `pop`.
 
-        let new_leaf = LeafNode::<K, V, Config>::create_with_pair(key, value, hash);
+        let new_leaf = LeafNode::<K, V, Config>::create_with_pair(cfg, key, value, hash);
 
         let new_bitmap = self.bitmap | (1 << index);
 
-        Config::allocate::<Self>(self.children.len() + 1, move |inner| unsafe {
+        cfg.allocate::<Self>(self.children.len() + 1, move |inner| unsafe {
             write(
                 &mut inner._header,
                 NodeHeader::new::<Self>(self.level(), self.children.len() + 1, hash),
@@ -118,12 +120,19 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
         })
     }
 
-    fn insert_occupied(&self, key: K, value: V, hash: HashCode, pop: usize) -> Config::NodeStore {
+    fn insert_occupied(
+        &self,
+        cfg: &Config,
+        key: K,
+        value: V,
+        hash: HashCode,
+        pop: usize,
+    ) -> Config::NodeStore {
         // Allocate a new InnerNode with the `pop`th child replaced by the result
         // of inserting k, v into the child.
-        let new_child = self.children[pop].insert(key, value, hash);
+        let new_child = self.children[pop].insert(cfg, key, value, hash);
 
-        Config::allocate::<Self>(self.children.len(), |inner| unsafe {
+        cfg.allocate::<Self>(self.children.len(), |inner| unsafe {
             write(&mut inner._header, self._header.clone());
             inner.bitmap = self.bitmap;
             for (i, child) in self.children.iter().enumerate() {
@@ -137,7 +146,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
         })
     }
 
-    pub fn remove(&self, key: &K, hash: HashCode) -> Option<Config::NodeStore> {
+    pub fn remove(&self, cfg: &Config, key: &K, hash: HashCode) -> Option<Config::NodeStore> {
         debug_assert!(self.level() <= MAX_LEVEL);
 
         let index = hash_bits_for_level(hash, self.level());
@@ -146,42 +155,39 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
 
         if !occupied {
             // The key is not in the map.
-            return Some(Config::upgrade_ref(self));
+            return Some(cfg.upgrade_ref(self));
         }
 
         let masked_bitmap = ((1 << index) - 1) & self.bitmap;
         let pop = masked_bitmap.count_ones() as usize;
 
-        let next = self.children[pop].remove(key, hash);
+        let next = self.children[pop].remove(cfg, key, hash);
 
         let cur_ptr = &*self.children[pop];
 
         if let Some(next) = next {
             if core::ptr::eq(&*next, cur_ptr) {
                 // The child was not removed.
-                return Some(Config::upgrade_ref(self));
+                return Some(cfg.upgrade_ref(self));
             }
 
             // The child was modified. We have a new pointer that we want to replace our current pointer with, but the
             // bitmap is unnafected.
-            Some(Config::allocate::<Self>(
-                self.children.len(),
-                |inner| unsafe {
-                    write(&mut inner._header, self._header.clone());
-                    inner.bitmap = self.bitmap;
+            Some(cfg.allocate::<Self>(self.children.len(), |inner| unsafe {
+                write(&mut inner._header, self._header.clone());
+                inner.bitmap = self.bitmap;
 
-                    debug_assert_eq!(self.children.len(), inner.children.len());
+                debug_assert_eq!(self.children.len(), inner.children.len());
 
-                    for i in 0..inner.children.len() {
-                        if i.cmp(&pop) != Ordering::Equal {
-                            write(&mut inner.children[i], self.children[i].clone());
-                        }
+                for i in 0..inner.children.len() {
+                    if i.cmp(&pop) != Ordering::Equal {
+                        write(&mut inner.children[i], self.children[i].clone());
                     }
+                }
 
-                    // We do this at the end to avoid requiring next to be copy.
-                    write(&mut inner.children[pop], next);
-                },
-            ))
+                // We do this at the end to avoid requiring next to be copy.
+                write(&mut inner.children[pop], next);
+            }))
         } else {
             // The child was removed.
 
@@ -195,7 +201,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
             } else {
                 let new_bitmap = self.bitmap & !(1 << index);
 
-                Some(Config::allocate::<Self>(new_len, |inner| unsafe {
+                Some(cfg.allocate::<Self>(new_len, |inner| unsafe {
                     write(
                         &mut inner._header,
                         NodeHeader::new::<Self>(self.level(), new_len, self._header.hash),
@@ -216,7 +222,11 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
         }
     }
 
-    pub fn reparent(left: Config::NodeStore, right: Config::NodeStore) -> Config::NodeStore {
+    pub fn reparent(
+        cfg: &Config,
+        left: Config::NodeStore,
+        right: Config::NodeStore,
+    ) -> Config::NodeStore {
         let leading_same_bits = (left.hash ^ right.hash).leading_zeros();
 
         let next_level = if leading_same_bits < 4 {
@@ -230,7 +240,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
 
         debug_assert!(next_level < MAX_LEVEL);
 
-        Config::allocate::<InteriorNode<K, V, Config>>(2, move |inner| unsafe {
+        cfg.allocate::<InteriorNode<K, V, Config>>(2, move |inner| unsafe {
             write(
                 &mut inner._header,
                 NodeHeader::new::<InteriorNode<K, V, Config>>(next_level, 2, left.hash),

@@ -1,7 +1,6 @@
 use core::{
     borrow::Borrow,
-    hash::{Hash, Hasher},
-    marker::PhantomData,
+    hash::{BuildHasher, Hash},
     ops::Index,
 };
 
@@ -11,37 +10,33 @@ use crate::{
     node::{util::HashCode, LeafNode},
 };
 
-pub struct HamtMap<
-    K: Eq + Hash,
-    V,
-    #[cfg(feature = "std")] H: Hasher + Default = std::collections::hash_map::DefaultHasher,
-    #[cfg(not(feature = "std"))] H: Hasher + Default,
-    Config: HamtConfig<K, V> = DefaultConfig,
-> {
-    _ph: PhantomData<(K, V, Config, H)>,
+pub struct HamtMap<K: Eq + Hash, V, Config: HamtConfig<K, V> = DefaultConfig> {
+    config: Config,
     root: Option<Config::NodeStore>,
 }
 
-impl<K: Eq + Hash, V, H: Hasher + Default, Config: HamtConfig<K, V>> Default
-    for HamtMap<K, V, H, Config>
-{
+impl<K: Eq + Hash, V> HamtMap<K, V> {
+    pub fn new() -> Self {
+        Self::new_with_config(DefaultConfig::default())
+    }
+}
+
+impl<K: Eq + Hash, V> Default for HamtMap<K, V> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Eq + Hash, V, H: Hasher + Default, Config: HamtConfig<K, V>> Clone
-    for HamtMap<K, V, H, Config>
-{
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Clone for HamtMap<K, V, Config> {
     fn clone(&self) -> Self {
         Self {
-            _ph: PhantomData,
+            config: self.config.clone(),
             root: self.root.clone(),
         }
     }
 }
 
-impl<K, Q, V, H: Hasher + Default, Config: HamtConfig<K, V>> Index<&Q> for HamtMap<K, V, H, Config>
+impl<K, Q, V, Config: HamtConfig<K, V>> Index<&Q> for HamtMap<K, V, Config>
 where
     K: Eq + Hash,
     Q: Borrow<K> + ?Sized,
@@ -53,21 +48,14 @@ where
     }
 }
 
-impl<K: Eq + Hash, V, H: Hasher + Default, Config: HamtConfig<K, V>> HamtMap<K, V, H, Config> {
-    pub fn new() -> Self {
-        Self {
-            _ph: PhantomData,
-            root: None,
-        }
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtMap<K, V, Config> {
+    pub fn new_with_config(config: Config) -> Self {
+        Self { config, root: None }
     }
 
     /// Get a value from the map for a given key, if it exists.
     pub fn get(&self, key: &K) -> Option<&V> {
-        let hash = {
-            let mut hasher = H::default();
-            key.hash(&mut hasher);
-            hasher.finish()
-        } as HashCode;
+        let hash = self.config.build_hasher().hash_one(key) as HashCode;
 
         self.root
             .as_ref()
@@ -79,20 +67,21 @@ impl<K: Eq + Hash, V, H: Hasher + Default, Config: HamtConfig<K, V>> HamtMap<K, 
     ///
     /// Returns a new HAMT with the inserted key-value pair.
     pub fn insert(&self, key: K, value: V) -> Self {
-        let hash = {
-            let mut hasher = H::default();
-            key.hash(&mut hasher);
-            hasher.finish()
-        } as HashCode;
+        let hash = self.config.build_hasher().hash_one(&key) as HashCode;
 
         match self.root.as_ref() {
             Some(root) => Self {
-                _ph: PhantomData,
-                root: Some(root.insert(key, value, hash)),
+                config: self.config.clone(),
+                root: Some(root.insert(&self.config, key, value, hash)),
             },
             None => Self {
-                _ph: PhantomData,
-                root: Some(LeafNode::<K, V, Config>::create_with_pair(key, value, hash)),
+                config: self.config.clone(),
+                root: Some(LeafNode::<K, V, Config>::create_with_pair(
+                    &self.config,
+                    key,
+                    value,
+                    hash,
+                )),
             },
         }
     }
@@ -101,19 +90,15 @@ impl<K: Eq + Hash, V, H: Hasher + Default, Config: HamtConfig<K, V>> HamtMap<K, 
     ///
     /// Returns a new HAMT with the given key removed.
     pub fn remove(&self, key: &K) -> Self {
-        let hash = {
-            let mut hasher = H::default();
-            key.hash(&mut hasher);
-            hasher.finish()
-        } as HashCode;
+        let hash = self.config.build_hasher().hash_one(key) as HashCode;
 
         match self.root.as_ref() {
             Some(root) => Self {
-                _ph: PhantomData,
-                root: root.remove(key, hash),
+                config: self.config.clone(),
+                root: root.remove(&self.config, key, hash),
             },
             None => Self {
-                _ph: PhantomData,
+                config: self.config.clone(),
                 root: None,
             },
         }

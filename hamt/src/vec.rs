@@ -10,26 +10,35 @@ use crate::{
 };
 
 pub struct HamtVec<V, Config: HamtConfig<(), V> = DefaultConfig> {
+    config: Config,
     slice: HamtVecSlice<V, Config>,
 }
 
 impl<V> Default for HamtVec<V, DefaultConfig> {
     fn default() -> Self {
-        Self::new()
+        Self::new_with_config(DefaultConfig::default())
     }
 }
 
 impl<V, Config: HamtConfig<(), V>> Clone for HamtVec<V, Config> {
     fn clone(&self) -> Self {
         Self {
+            config: self.config.clone(),
             slice: self.slice.clone(),
         }
     }
 }
 
-impl<V, Config: HamtConfig<(), V>> HamtVec<V, Config> {
+impl<V> HamtVec<V> {
     pub fn new() -> Self {
+        Self::new_with_config(DefaultConfig::default())
+    }
+}
+
+impl<V, Config: HamtConfig<(), V>> HamtVec<V, Config> {
+    pub fn new_with_config(config: Config) -> Self {
         Self {
+            config,
             slice: HamtVecSlice {
                 offset: 0,
                 len: 0,
@@ -40,12 +49,16 @@ impl<V, Config: HamtConfig<(), V>> HamtVec<V, Config> {
 
     pub fn push(&self, v: V) -> Self {
         Self {
+            config: self.config.clone(),
             slice: HamtVecSlice {
                 offset: self.slice.offset,
                 len: self.slice.len + 1,
                 root: match self.slice.root.as_ref() {
-                    Some(root) => Some(root.insert((), v, self.slice.len as HashCode)),
+                    Some(root) => {
+                        Some(root.insert(&self.config, (), v, self.slice.len as HashCode))
+                    }
                     None => Some(LeafNode::<(), V, Config>::create_with_pair(
+                        &self.config,
                         (),
                         v,
                         self.slice.len as HashCode,

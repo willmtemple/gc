@@ -1,27 +1,56 @@
-use core::{hash::Hash, ptr::Pointee};
+use core::{
+    alloc::Allocator,
+    hash::{BuildHasher, Hash},
+    ptr::Pointee,
+};
 
 use alloc::{alloc::Global, sync::Arc};
 
 use crate::node::{HamtNode, NodeHeader};
 
-use super::{common, HamtConfig, Pair};
+use super::{common, DefaultHasher, HamtConfig, Pair};
 
 #[derive(Copy, Clone)]
-pub struct CloningConfig;
+pub struct CloningConfig<H: BuildHasher + Clone = DefaultHasher, A: Allocator + Clone = Global> {
+    allocator: A,
+    build_hasher: H,
+}
 
-unsafe impl<K: Eq + Hash + Clone, V: Clone> HamtConfig<K, V> for CloningConfig {
-    type NodeStore = Arc<NodeHeader<K, V, Self>>;
+impl Default for CloningConfig {
+    fn default() -> Self {
+        Self {
+            allocator: Global,
+            build_hasher: DefaultHasher::default(),
+        }
+    }
+}
 
+unsafe impl<H: BuildHasher + Clone, A: Allocator + Clone, K: Eq + Hash + Clone, V: Clone>
+    HamtConfig<K, V> for CloningConfig<H, A>
+{
+    type Allocator = A;
+    type BuildHasher = H;
+
+    type NodeStore = Arc<NodeHeader<K, V, Self>, Self::Allocator>;
     type Kvp = Pair<K, V>;
 
     fn allocate<T: HamtNode<K, V, Self> + ?Sized>(
+        &self,
         metadata: <T as Pointee>::Metadata,
         init: impl FnOnce(&mut T),
     ) -> Self::NodeStore {
-        common::allocate_refcounted(metadata, init, Global)
+        common::allocate_refcounted(self.allocator.clone(), metadata, init)
     }
 
-    fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(ptr: &T) -> Self::NodeStore {
-        common::upgrade_refcounted(ptr, Global)
+    fn upgrade_ref<T: HamtNode<K, V, Self> + ?Sized>(&self, ptr: &T) -> Self::NodeStore {
+        common::upgrade_refcounted(self.allocator.clone(), ptr)
+    }
+
+    fn allocator(&self) -> Self::Allocator {
+        self.allocator.clone()
+    }
+
+    fn build_hasher(&self) -> Self::BuildHasher {
+        self.build_hasher.clone()
     }
 }

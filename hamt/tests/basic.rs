@@ -61,7 +61,7 @@ fn hm_test() {
 
 #[test]
 fn hamt_vec() {
-    let mut hv = HamtVec::<i32, CloningConfig>::new();
+    let mut hv = HamtVec::new_with_config(CloningConfig::default());
 
     hv = hv.push(0);
 
@@ -98,7 +98,7 @@ fn hamt_vec() {
 #[test]
 fn hv_iter() {
     let v = [0, 1, 2, 3, 4, 5, 6, 7];
-    let mut hv = HamtVec::<i32, CloningConfig>::new();
+    let mut hv = HamtVec::new_with_config(CloningConfig::default());
 
     for i in v.iter() {
         hv = hv.push(*i);
@@ -120,16 +120,11 @@ fn hv_iter() {
         assert_eq!(*v, idx as i32 + 1);
     }
 
-    if HamtVec::<i32, CloningConfig>::new().iter().next().is_some() {
+    if HamtVec::<()>::new().iter().next().is_some() {
         unreachable!();
     }
 
-    if HamtVec::<i32, CloningConfig>::new()
-        .slice(0..0)
-        .iter()
-        .next()
-        .is_some()
-    {
+    if HamtVec::<()>::new().slice(0..0).iter().next().is_some() {
         unreachable!();
     }
 }

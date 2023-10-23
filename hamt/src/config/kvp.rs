@@ -1,7 +1,9 @@
+use core::alloc::Allocator;
+
 use alloc::{rc::Rc, sync::Arc};
 
-pub trait Kvp<K, V>: Clone {
-    fn new(key: K, value: V) -> Self;
+pub trait Kvp<K, V, A: Allocator>: Clone {
+    fn new(key: K, value: V, a: A) -> Self;
 
     fn key(&self) -> &K;
 
@@ -12,9 +14,9 @@ pub trait Kvp<K, V>: Clone {
     }
 }
 
-impl<K, V> Kvp<K, V> for Arc<(K, V)> {
-    fn new(key: K, value: V) -> Self {
-        Arc::new((key, value))
+impl<K, V, A: Allocator + Clone> Kvp<K, V, A> for Arc<(K, V), A> {
+    fn new(key: K, value: V, a: A) -> Self {
+        Arc::new_in((key, value), a)
     }
 
     fn key(&self) -> &K {
@@ -26,9 +28,9 @@ impl<K, V> Kvp<K, V> for Arc<(K, V)> {
     }
 }
 
-impl<K, V> Kvp<K, V> for Rc<(K, V)> {
-    fn new(key: K, value: V) -> Self {
-        Rc::new((key, value))
+impl<K, V, A: Allocator + Clone> Kvp<K, V, A> for Rc<(K, V), A> {
+    fn new(key: K, value: V, a: A) -> Self {
+        Rc::new_in((key, value), a)
     }
 
     fn key(&self) -> &K {
@@ -47,8 +49,8 @@ pub struct Pair<K, V> {
     value: V,
 }
 
-impl<K: Clone, V: Clone> Kvp<K, V> for Pair<K, V> {
-    fn new(key: K, value: V) -> Self {
+impl<K: Clone, V: Clone, A: Allocator> Kvp<K, V, A> for Pair<K, V> {
+    fn new(key: K, value: V, _: A) -> Self {
         Self { key, value }
     }
 

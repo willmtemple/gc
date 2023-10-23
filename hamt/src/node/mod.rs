@@ -138,19 +138,19 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> NodeHeader<K, V, Config> {
         }
     }
 
-    pub fn insert(&self, k: K, v: V, hash: HashCode) -> Config::NodeStore {
+    pub fn insert(&self, cfg: &Config, k: K, v: V, hash: HashCode) -> Config::NodeStore {
         match self.upgrade() {
-            NodePtr::Leaf(node) => node.insert(k, v, hash),
-            NodePtr::Collision(node) => node.insert(k, v, hash),
-            NodePtr::Interior(node) => node.insert(k, v, hash),
+            NodePtr::Leaf(node) => node.insert(cfg, k, v, hash),
+            NodePtr::Collision(node) => node.insert(cfg, k, v, hash),
+            NodePtr::Interior(node) => node.insert(cfg, k, v, hash),
         }
     }
 
-    pub fn remove(&self, k: &K, hash: HashCode) -> Option<Config::NodeStore> {
+    pub fn remove(&self, cfg: &Config, k: &K, hash: HashCode) -> Option<Config::NodeStore> {
         match self.upgrade() {
-            NodePtr::Leaf(node) => node.remove(k),
-            NodePtr::Collision(node) => node.remove(k, hash),
-            NodePtr::Interior(node) => node.remove(k, hash),
+            NodePtr::Leaf(node) => node.remove(cfg, k),
+            NodePtr::Collision(node) => node.remove(cfg, k, hash),
+            NodePtr::Interior(node) => node.remove(cfg, k, hash),
         }
     }
 }

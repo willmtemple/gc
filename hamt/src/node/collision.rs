@@ -35,21 +35,22 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
         }
     }
 
-    pub fn insert(&self, key: K, value: V, hash: HashCode) -> Config::NodeStore {
+    pub fn insert(&self, cfg: &Config, key: K, value: V, hash: HashCode) -> Config::NodeStore {
         if hash == self.hash() {
-            self.add_pair(key, value)
+            self.add_pair(cfg, key, value)
         } else {
             InteriorNode::<K, V, Config>::reparent(
-                Config::upgrade_ref(self),
-                LeafNode::<K, V, Config>::create_with_pair(key, value, hash),
+                cfg,
+                cfg.upgrade_ref(self),
+                LeafNode::<K, V, Config>::create_with_pair(cfg, key, value, hash),
             )
         }
     }
 
-    pub fn remove(&self, key: &K, hash: HashCode) -> Option<Config::NodeStore> {
+    pub fn remove(&self, cfg: &Config, key: &K, hash: HashCode) -> Option<Config::NodeStore> {
         if hash != self.hash() {
             // The key is not in the map.
-            return Some(Config::upgrade_ref(self));
+            return Some(cfg.upgrade_ref(self));
         }
 
         let cur_value = self
@@ -66,20 +67,20 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
                 // The key is in the collision node, but there are other keys. We can remove the key from the collision
                 // node.
 
-                Some(self.remove_idx(idx))
+                Some(self.remove_idx(cfg, idx))
             }
         } else {
             // The key is not in the collision node.
-            Some(Config::upgrade_ref(self))
+            Some(cfg.upgrade_ref(self))
         }
     }
 
-    fn add_pair(&self, key: K, value: V) -> Config::NodeStore {
+    fn add_pair(&self, cfg: &Config, key: K, value: V) -> Config::NodeStore {
         let cur_value = self.find(&key);
 
         if let Some((idx, _)) = cur_value {
             // Key is present in the collision, so replace it.
-            Config::allocate::<Self>(self.values.len(), move |collision| unsafe {
+            cfg.allocate::<Self>(self.values.len(), move |collision| unsafe {
                 write(&mut collision._header, self._header.clone());
                 for i in 0..self.values.len() {
                     if i != idx {
@@ -87,7 +88,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
                     }
                 }
 
-                write(&mut collision.values[idx], Config::Kvp::new(key, value));
+                write(&mut collision.values[idx], cfg.new_kvp(key, value));
             })
         } else {
             // Key is not present in the collision, so add it.
@@ -95,7 +96,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
 
             assert!(next_len <= NodeHeader::<K, V, Config>::SIZE_MASK);
 
-            Config::allocate::<Self>(next_len, |leaf| unsafe {
+            cfg.allocate::<Self>(next_len, |leaf| unsafe {
                 write(
                     &mut leaf._header,
                     NodeHeader::new::<Self>(MAX_LEVEL, next_len, self.hash()),
@@ -103,18 +104,15 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> CollisionNode<K, V, Config> {
                 for i in 0..self.values.len() {
                     write(&mut leaf.values[i], self.values[i].clone());
                 }
-                write(
-                    &mut leaf.values[self.values.len()],
-                    Config::Kvp::new(key, value),
-                );
+                write(&mut leaf.values[self.values.len()], cfg.new_kvp(key, value));
             })
         }
     }
 
-    fn remove_idx(&self, idx: usize) -> Config::NodeStore {
+    fn remove_idx(&self, cfg: &Config, idx: usize) -> Config::NodeStore {
         debug_assert!(self.values.len() > 1);
 
-        Config::allocate::<Self>(self.values.len() - 1, |collision| unsafe {
+        cfg.allocate::<Self>(self.values.len() - 1, |collision| unsafe {
             write(
                 &mut collision._header,
                 NodeHeader::new::<Self>(MAX_LEVEL, self.values.len() - 1, self.hash()),

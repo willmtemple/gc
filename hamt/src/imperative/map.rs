@@ -1,4 +1,4 @@
-use core::hash::{Hash, Hasher};
+use core::hash::Hash;
 
 use crate::{
     config::{DefaultConfig, HamtConfig},
@@ -6,26 +6,18 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct ImperativeHamtMap<
-    K: Eq + Hash,
-    V,
-    #[cfg(feature = "std")] HamtHasher: Hasher + Default = std::collections::hash_map::DefaultHasher,
-    #[cfg(not(feature = "std"))] HamtHasher: Hasher + Default,
-    Config: HamtConfig<K, V> = DefaultConfig,
-> {
-    hamt: HamtMap<K, V, HamtHasher, Config>,
+pub struct ImperativeHamtMap<K: Eq + Hash, V, Config: HamtConfig<K, V> = DefaultConfig> {
+    hamt: HamtMap<K, V, Config>,
 }
 
-impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
-    ImperativeHamtMap<K, V, HamtHasher, Config>
-{
-    pub fn new() -> Self {
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> ImperativeHamtMap<K, V, Config> {
+    pub fn new_with_config(config: Config) -> Self {
         Self {
-            hamt: HamtMap::<K, V, HamtHasher, Config>::new(),
+            hamt: HamtMap::<K, V, Config>::new_with_config(config),
         }
     }
 
-    pub fn as_persistent(&self) -> HamtMap<K, V, HamtHasher, Config> {
+    pub fn as_persistent(&self) -> HamtMap<K, V, Config> {
         self.hamt.clone()
     }
 
@@ -44,10 +36,8 @@ impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>>
     }
 }
 
-impl<K: Eq + Hash, V, HamtHasher: Hasher + Default, Config: HamtConfig<K, V>> Default
-    for ImperativeHamtMap<K, V, HamtHasher, Config>
-{
+impl<K: Eq + Hash, V> Default for ImperativeHamtMap<K, V> {
     fn default() -> Self {
-        Self::new()
+        Self::new_with_config(DefaultConfig::default())
     }
 }
