@@ -4,8 +4,8 @@ pub use kvp::*;
 pub mod arc;
 pub use arc::ArcConfig;
 
-// pub mod rc;
-// pub use rc::RcConfig;
+pub mod rc;
+pub use rc::RcConfig;
 
 pub mod clone;
 pub use clone::CloningConfig;
@@ -22,12 +22,29 @@ use core::{
 use super::node::{HamtNode, NodeHeader};
 
 /// The default configuration for HAMTs. This configuration uses `Arc` for both pointers and key-value pairs, and it
-/// allocates all nodes on the heap using the global allocator.
+/// allocates all nodes on the heap using the global allocator. It uses the default hasher.
 pub type DefaultConfig = ArcConfig;
 
+/// The default hasher used by the default HAMT configuration.
+///
+/// When the `"std"` feature is enabled, this is an alias for the default HashMap hasher.
 #[cfg(feature = "std")]
-pub type DefaultHasher = std::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>;
+pub type DefaultHasher = core::hash::BuildHasherDefault<std::collections::hash_map::DefaultHasher>;
 
+/// Configuration for a HAMT. Configuration is part of every HAMT collection type ([`HamtMap`], [`HamtSet`], [`HamtVec`])
+/// and describes the behaviors of the HAMT.
+///
+/// It defines the:
+/// - storage for nodes.
+/// - storage for key-value pairs.
+/// - allocator used to allocate nodes.
+/// - hasher used to hash keys.
+///
+/// And it implements methods to:
+/// - allocate nodes.
+/// - wrap key-value pairs.
+/// - to transmute node references to managed node header pointers.
+///
 /// # Safety
 ///
 /// This trait is somewhat intricate and must be implemented with great care to avoid memory errors, undefined behavior,
@@ -45,8 +62,10 @@ pub unsafe trait HamtConfig<K: Eq + Hash, V>: Clone + Sized {
     // The type of a key-value pair stored in the HAMT.
     type Kvp: Kvp<K, V, Self::Allocator>;
 
+    /// Gets a copy of the Allocator used by this config.
     fn allocator(&self) -> Self::Allocator;
 
+    /// Gets a copy of the BuildHasher used by this config.
     fn build_hasher(&self) -> Self::BuildHasher;
 
     /// Allocate a region of memory for a node of type `T` with the given `metadata`.
@@ -55,7 +74,7 @@ pub unsafe trait HamtConfig<K: Eq + Hash, V>: Clone + Sized {
     /// This function must implement manual memory allocation and initialization.
     ///
     /// Returning a pointer to memory that has not been initialized to zero will cause
-    /// undefinded behavior.
+    /// undefined behavior.
     ///
     /// Failing to honor the `metadata` parameter will cause undefined behavior.
     fn allocate<T: HamtNode<K, V, Self> + ?Sized>(

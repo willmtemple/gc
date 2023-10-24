@@ -1,5 +1,17 @@
 {
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.checkOnSave": true,
-  "cSpell.words": ["Hamt", "Pointee", "repr"]
+  "cSpell.words": [
+    "aarch",
+    "Hamt",
+    "HAMTS",
+    "Hasher",
+    "Pointee",
+    "refcounted",
+    "refcounting",
+    "reparent",
+    "repr",
+    "Uninit",
+    "wtemple"
+  ]
 }

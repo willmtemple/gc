@@ -172,7 +172,7 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> InteriorNode<K, V, Config> {
             }
 
             // The child was modified. We have a new pointer that we want to replace our current pointer with, but the
-            // bitmap is unnafected.
+            // bitmap is unaffected.
             Some(cfg.allocate::<Self>(self.children.len(), |inner| unsafe {
                 write(&mut inner._header, self._header.clone());
                 inner.bitmap = self.bitmap;

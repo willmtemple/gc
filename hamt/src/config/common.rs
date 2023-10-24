@@ -1,4 +1,3 @@
-use core::alloc::Allocator;
 use core::mem::MaybeUninit;
 use core::ptr::{null, Pointee};
 use core::{alloc::Layout, hash::Hash};
