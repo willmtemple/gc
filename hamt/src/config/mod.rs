@@ -9,6 +9,7 @@ pub use rc::RcConfig;
 
 pub mod clone;
 pub use clone::CloningConfig;
+pub use clone::CloningRcConfig;
 
 mod common;
 

@@ -3,7 +3,10 @@
   "rust-analyzer.checkOnSave": true,
   "cSpell.words": [
     "aarch",
+    "alloc",
+    "Bagwell",
     "Hamt",
+    "hamter",
     "HAMTS",
     "Hasher",
     "Pointee",
@@ -11,7 +14,9 @@
     "refcounting",
     "reparent",
     "repr",
+    "structs",
     "Uninit",
+    "usize",
     "wtemple"
   ]
 }

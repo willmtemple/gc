@@ -63,10 +63,10 @@ assert_eq!(vec2.len(), 2);
 
 All `Hamt*` can be customized using a `HamtConfig`. The default configuration uses `Arc` to store both nodes and key-value pairs, and it uses the registered global allocator to allocate memory for nodes. The `Config` parameter of `Hamt*` types can be used to change these defaults. We provide the following configurations:
 
-- `DefaultConfig` defaults to `ArcConfig<Global>`
-- `ArcConfig<A: Allocator>` uses `Arc` to store nodes and key-value pairs, using the provided allocator `A`. This results in a HAMT that is thread-safe.
-- `RcConfig<A: Allocator>` uses `Rc` to store nodes and key-value pairs, using the provided allocator `A`. This avoids the overhead of atomic reference counting, but the resulting HAMT is not thread-safe.
-- `CloningConfig<A: Allocator>` uses `Arc` to store nodes like `ArcConfig`, but stores the key-value pairs directly, cloning them when necessary. This requires that the key and value types implement `Clone`, which the other configurations do not require. This is a good choice for types that are cheap to clone or that implement `Copy`, such as integers, references, and small `Copy` structs.
+- `DefaultConfig`: alias for `ArcConfig<DefaultBuildHasher, Global>`
+- `ArcConfig<B: BuildHasher, A: Allocator>` uses `Arc` to store nodes and key-value pairs, using the provided allocator `A` and BuildHasher `B`. This results in a HAMT that is thread-safe.
+- `RcConfig<B: BuildHasher, A: Allocator>` uses `Rc` to store nodes and key-value pairs, using the provided allocator `A` and BuildHasher `B`. This avoids the overhead of atomic reference counting, but the resulting HAMT is not thread-safe.
+- `CloningConfig<B: BuildHasher, A: Allocator>` uses `Arc` to store nodes like `ArcConfig`, but stores the key-value pairs directly, cloning them when necessary. This requires that the key and value types implement `Clone`, which the other configurations do not require. This is a good choice for types that are cheap to clone or that implement `Copy`, such as integers, references, and small `Copy` structs.
 - `CloningRcConfig<A: Allocator>` is like `CloningConfig`, but uses `Rc` instead of `Arc` to store nodes, with the same tradeoffs as `RcConfig`.
 
 You may also implement your own `HamtConfig` type to further customize the behavior of the HAMT. However, this is not recommended as the `HamtConfig` trait is `unsafe` and must be implemented with care.
