@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use hamt::{vec::HamtVecSlice, HamtVec};
+use hamt::HamtVec;
 
-use crate::{ast::Param, scope::Scope, Interpreter, InterpreterResult, Value as Value1};
+use crate::{ast::Param, scope::Scope, Interpreter, InterpreterResult};
 
-use super::{block::Block, to_value1_args, Nil, Object, Value};
+use super::{block::Block, Nil, Slice, Value};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Function {
@@ -21,22 +21,13 @@ impl Value for Function {
         core::ptr::eq(self, other)
     }
 
-    fn call(
-        &self,
-        interpreter: &mut Interpreter,
-        args: HamtVecSlice<Arc<Object>>,
-    ) -> InterpreterResult {
+    fn call(&self, interpreter: &mut Interpreter, args: Slice) -> InterpreterResult {
         let mut call_scope = self.scope.clone();
-
-        let args = to_value1_args(args);
 
         for (idx, param) in self.params.iter().enumerate() {
             match param {
                 Param::Symbol(s) => {
-                    let argument = args
-                        .get(idx)
-                        .cloned()
-                        .unwrap_or(Value1::Object(Nil.to_object()));
+                    let argument = args.get(idx).cloned().unwrap_or(Nil.to_object());
 
                     call_scope
                         .define(s)
@@ -54,10 +45,10 @@ impl Value for Function {
                             let mut vec = super::Vec::default();
 
                             for item in rest.iter() {
-                                vec = vec.push(item.clone().to_value2());
+                                vec = vec.push(item.clone());
                             }
 
-                            vec.to_value1()
+                            vec.to_object()
                         })
                         .expect("fatal error: new binding is already set")
                 }
@@ -83,7 +74,7 @@ impl Value for Function {
                 self.name.as_deref().unwrap_or(""),
                 strs.join(", "),
             ))
-            .to_value1(),
+            .to_object(),
         )
     }
 }

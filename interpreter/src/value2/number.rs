@@ -9,7 +9,7 @@ impl Value for i64 {
 
     fn to_string(&self, _: &mut crate::Interpreter) -> crate::InterpreterResult {
         crate::InterpreterResult::Value(
-            super::String::from(<i64 as ToString>::to_string(self)).to_value1(),
+            super::String::from(<i64 as ToString>::to_string(self)).to_object(),
         )
     }
 }

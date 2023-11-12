@@ -1,12 +1,11 @@
 use std::{mem::replace, ops::Deref, sync::Arc};
 
-use hamt::{vec::HamtVecSlice, HamtMap, HamtSet, HamtVec};
+use hamt::{HamtMap, HamtSet, HamtVec};
 use seglisp::{Body, SegLisp, SegLispNode};
 
 use crate::{
     scope::Scope,
-    value::Value,
-    value2::{self, Block, Legacy, Map, Set, Sigil, Symbol, Tuple, Value as Value2},
+    value2::{self, Block, Map, Object, Set, Sigil, Slice, Symbol, Tuple, Value as Value2},
     Interpreter, InterpreterError, InterpreterResult,
 };
 
@@ -20,18 +19,18 @@ use crate::{
 //     "nil",
 // };
 
-fn seglisp_token_to_value(interpreter: &mut Interpreter, token: &SegLispNode) -> Value {
+fn seglisp_token_to_value(interpreter: &mut Interpreter, token: &SegLispNode) -> Arc<Object> {
     match &token.value {
         // Block patterns.
         SegLisp::List {
             delimiters: ('{', '}') | (char::REPLACEMENT_CHARACTER, char::REPLACEMENT_CHARACTER),
             contents,
-        } => seglisp_body_to_block(interpreter, contents).to_value1(),
+        } => seglisp_body_to_block(interpreter, contents).to_object(),
         // Vector pattern.
         SegLisp::List {
             delimiters: ('[', ']'),
             contents,
-        } => seglisp_body_to_vec(interpreter, contents),
+        } => seglisp_segments_to_vecvec(interpreter, contents).to_object(),
         // Tuple pattern.
         SegLisp::List {
             delimiters: ('(', ')'),
@@ -42,17 +41,20 @@ fn seglisp_token_to_value(interpreter: &mut Interpreter, token: &SegLispNode) ->
             contents: _,
         } => unreachable!("invalid delimiter pattern: {:?}", delimiters),
 
-        SegLisp::Symbol(s) => Symbol { name: (*s).into() }.to_value1(),
-        SegLisp::Sigil(s) => interpreter.intern_sigil(s).to_value1(),
+        SegLisp::Symbol(s) => Symbol { name: (*s).into() }.to_object(),
+        SegLisp::Sigil(s) => interpreter.intern_sigil(s).to_object(),
         SegLisp::Number(n) => n
             .parse::<i64>()
             .unwrap_or_else(|_| panic!("failed to parse i64: {}", n))
-            .to_value1(),
-        SegLisp::String(s) => value2::String::from(s.as_ref()).to_value1(),
+            .to_object(),
+        SegLisp::String(s) => value2::String::from(s.as_ref()).to_object(),
     }
 }
 
-fn seglisp_token_to_value_alt(interpreter: &mut Interpreter, token: &SegLispNode) -> Option<Value> {
+fn seglisp_token_to_value_alt(
+    interpreter: &mut Interpreter,
+    token: &SegLispNode,
+) -> Option<Arc<Object>> {
     // We have already parsed a `#` token, and this indicates that we want to interpret the next data structure as
     // some sort of literal.
     match &token.value {
@@ -70,11 +72,11 @@ fn seglisp_token_to_value_alt(interpreter: &mut Interpreter, token: &SegLispNode
     }
 }
 
-fn seglisp_segments_to_vecvec(interpreter: &mut Interpreter, tokens: &Body) -> HamtVec<Value> {
-    let mut bv = HamtVec::new();
+fn seglisp_segments_to_vecvec(interpreter: &mut Interpreter, tokens: &Body) -> value2::Vec {
+    let mut bv = value2::Vec::default();
 
     for segment in tokens.data.iter() {
-        let mut sv = HamtVec::new();
+        let mut sv = value2::Vec::default();
 
         let mut alt = false;
         for token in segment.data.iter() {
@@ -87,7 +89,7 @@ fn seglisp_segments_to_vecvec(interpreter: &mut Interpreter, tokens: &Body) -> H
                 if let Some(v) = seglisp_token_to_value_alt(interpreter, token) {
                     sv = sv.push(v);
                 } else {
-                    sv = sv.push(interpreter.intern_sigil("#").to_value1());
+                    sv = sv.push(interpreter.intern_sigil("#").to_object());
                     sv = sv.push(seglisp_token_to_value(interpreter, token));
                 }
                 alt = false;
@@ -96,45 +98,25 @@ fn seglisp_segments_to_vecvec(interpreter: &mut Interpreter, tokens: &Body) -> H
             }
         }
 
-        bv = bv.push(
-            sv.iter()
-                .map(|v| v.to_value2())
-                .collect::<value2::Vec>()
-                .to_value1(),
-        );
+        bv = bv.push(sv.to_object());
     }
 
     bv
 }
 
 pub fn seglisp_body_to_block(interpreter: &mut Interpreter, tokens: &Body) -> Block {
-    let body = seglisp_segments_to_vecvec(interpreter, tokens)
-        .iter()
-        .map(|v| v.to_value2())
-        .collect();
+    let body = seglisp_segments_to_vecvec(interpreter, tokens);
 
     Block { body }
 }
 
-fn seglisp_body_to_vec(interpreter: &mut Interpreter, tokens: &Body) -> Value {
+fn seglisp_body_to_tuple(interpreter: &mut Interpreter, tokens: &Body) -> Arc<Object> {
     let bv = seglisp_segments_to_vecvec(interpreter, tokens);
 
-    bv.iter()
-        .map(|v| v.to_value2())
-        .collect::<value2::Vec>()
-        .to_value1()
+    Tuple::new(bv).to_object()
 }
 
-fn seglisp_body_to_tuple(interpreter: &mut Interpreter, tokens: &Body) -> Value {
-    let bv = seglisp_segments_to_vecvec(interpreter, tokens)
-        .iter()
-        .map(|v| v.to_value2())
-        .collect();
-
-    Tuple::new(bv).to_value1()
-}
-
-fn seglisp_body_to_map(interpreter: &mut Interpreter, tokens: &Body) -> Value {
+fn seglisp_body_to_map(interpreter: &mut Interpreter, tokens: &Body) -> Arc<Object> {
     let mut m = Map::new();
 
     for (entry_idx, entry) in tokens.data.iter().enumerate() {
@@ -143,8 +125,8 @@ fn seglisp_body_to_map(interpreter: &mut Interpreter, tokens: &Body) -> Value {
         let mut idx = 0;
 
         let lhs = match entry.data.get(idx).map(|v| &v.value) {
-            Some(SegLisp::Symbol(s)) => Symbol { name: (*s).into() }.to_value1(),
-            Some(SegLisp::String(s)) => value2::String::from(s.as_ref()).to_value1(),
+            Some(SegLisp::Symbol(s)) => Symbol { name: (*s).into() }.to_object(),
+            Some(SegLisp::String(s)) => value2::String::from(s.as_ref()).to_object(),
             Some(SegLisp::List {
                 delimiters: ('(', ')'),
                 contents,
@@ -175,36 +157,27 @@ fn seglisp_body_to_map(interpreter: &mut Interpreter, tokens: &Body) -> Value {
             panic!("expected token(s) after : in mapline");
         }
 
-        let mut rhs = HamtVec::new();
+        let mut rhs = value2::Vec::default();
 
         for token in entry.data.iter().skip(idx) {
             rhs = rhs.push(seglisp_token_to_value(interpreter, token));
         }
 
-        m = m.insert(
-            lhs.to_value2(),
-            rhs.iter()
-                .map(|v| v.to_value2())
-                .collect::<value2::Vec>()
-                .to_object(),
-        );
+        m = m.insert(lhs, rhs.to_object());
     }
 
-    m.to_value1()
+    m.to_object()
 }
 
-fn seglisp_body_to_set(interpreter: &mut Interpreter, tokens: &Body) -> Value {
+fn seglisp_body_to_set(interpreter: &mut Interpreter, tokens: &Body) -> Arc<Object> {
     let bv = seglisp_segments_to_vecvec(interpreter, tokens);
 
-    bv.iter()
-        .map(|v| v.to_value2())
-        .collect::<Set>()
-        .to_value1()
+    bv.iter().cloned().collect::<Set>().to_object()
 }
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub enum Expr {
-    Quote(HamtVecSlice<Value>),
+    Quote(Slice),
     Fn {
         name: Option<Symbol>,
         params: HamtVec<Param>,
@@ -259,7 +232,7 @@ pub enum Argument {
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub enum ValueOrExpr {
-    Value(Value),
+    Value(Arc<Object>),
     Expr(Box<Expr>),
 }
 
@@ -267,7 +240,7 @@ pub enum ValueOrExpr {
 pub struct Operator {
     pub precedence: i64,
     pub position: OperatorPosition,
-    pub value: Value,
+    pub value: Arc<Object>,
 }
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
@@ -285,7 +258,7 @@ pub enum Param {
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub enum ParseError {
-    UnexpectedToken(Value),
+    UnexpectedToken(Arc<Object>),
     UnknownOperator(Sigil),
     MacroExpansionError(Box<InterpreterError>),
     FunctionEvaluationError(Box<InterpreterError>),
@@ -332,12 +305,12 @@ pub fn parse_expr(
     stream.reset_peek();
 
     let e = match stream.peek() {
-        Some(Value::Object(s)) if s.is::<Symbol>() => {
+        Some(s) if s.is::<Symbol>() => {
             let s = s.downcast::<Symbol>().unwrap();
 
             match s.name.deref() {
                 "fn" => {
-                    let binding = if let Some(Value::Object(name)) = stream.peek() {
+                    let binding = if let Some(name) = stream.peek() {
                         if name.is::<Symbol>() {
                             Some(scope.define_with_attrs(
                                 name.downcast::<Symbol>().unwrap(),
@@ -371,7 +344,7 @@ pub fn parse_expr(
                             if let Some(attr_fn) = scope.resolve(name) {
                                 attr_fn
                                     .call(interpreter, {
-                                        let mut args = HamtVec::new();
+                                        let mut args = value2::Vec::default();
 
                                         args = args.push(fn_val.clone());
 
@@ -451,7 +424,7 @@ pub fn parse_expr(
                     stream.next();
                     let macro_fn = scope.resolve(s).unwrap();
                     let tokens = stream.unwrap();
-                    *stream = TokenStream::new(HamtVec::new().as_slice());
+                    *stream = TokenStream::new(value2::Vec::default().as_slice());
 
                     let segment_value = match macro_fn.call(interpreter, tokens) {
                         InterpreterResult::Value(v) => v,
@@ -472,13 +445,7 @@ pub fn parse_expr(
                     parse_expr(
                         interpreter,
                         scope,
-                        &mut TokenStream::new(
-                            segment
-                                .iter()
-                                .map(|v| v.clone().to_value1())
-                                .collect::<HamtVec<_>>()
-                                .as_slice(),
-                        ),
+                        &mut TokenStream::new(segment.as_slice()),
                     )?
                 }
                 _ => parse_term(interpreter, &mut scope.clone(), stream)?,
@@ -592,14 +559,7 @@ fn parse_function(
                 parse_param(
                     interpreter,
                     scope,
-                    &mut TokenStream::new(
-                        v.downcast::<value2::Vec>()
-                            .unwrap()
-                            .iter()
-                            .map(|v| v.clone().to_value1())
-                            .collect::<HamtVec<_>>()
-                            .as_slice(),
-                    ),
+                    &mut TokenStream::new(v.downcast::<value2::Vec>().unwrap().as_slice()),
                 )
             } else {
                 panic!("expected all params to be within vectors")
@@ -635,7 +595,7 @@ fn parse_function(
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Attribute {
     pub name: Symbol,
-    pub arguments: HamtVec<Value>,
+    pub arguments: value2::Vec,
 }
 
 fn parse_attributes(
@@ -671,12 +631,7 @@ fn parse_attributes(
                     panic!("expected each individual attribute to be a vector")
                 };
 
-                let attr = parse_attribute(&mut TokenStream::new(
-                    attr.iter()
-                        .map(|v| v.clone().to_value1())
-                        .collect::<HamtVec<_>>()
-                        .as_slice(),
-                ));
+                let attr = parse_attribute(&mut TokenStream::new(attr.as_slice()));
 
                 attrs = attrs.insert(attr.name.clone(), attr);
             }
@@ -699,9 +654,9 @@ fn parse_attribute(tokens: &mut TokenStream) -> Attribute {
     let next = tokens.next();
 
     let arguments = if let Some(args) = next.as_ref().and_then(|v| v.downcast::<Tuple>()) {
-        args.data().iter().map(|v| v.clone().to_value1()).collect()
+        args.data().clone()
     } else {
-        HamtVec::new()
+        value2::Vec::default()
     };
 
     // Check that the vec is empty
@@ -719,28 +674,24 @@ fn parse_param(
 ) -> Result<Param, ParseError> {
     let first = stream.next().unwrap();
 
-    match &first {
-        Value::Object(s) if s.is::<Symbol>() => {
-            Ok(Param::Symbol(s.downcast::<Symbol>().unwrap().clone()))
-        }
-        Value::Object(s) if s.is::<Sigil>() => {
-            let s = s.downcast::<Sigil>().unwrap();
-            if s.text(interpreter) == "..." {
-                let next = stream.next();
-                let Some(s) = next.as_ref().and_then(|v| v.downcast::<Symbol>()).cloned() else {
-                    panic!("expected symbol after & in param")
-                };
+    if first.is::<Symbol>() {
+        Ok(Param::Symbol(first.downcast::<Symbol>().unwrap().clone()))
+    } else if first.is::<Sigil>() {
+        let s = first.downcast::<Sigil>().unwrap();
+        if s.text(interpreter) == "..." {
+            let next = stream.next();
+            let Some(s) = next.as_ref().and_then(|v| v.downcast::<Symbol>()).cloned() else {
+                panic!("expected symbol after & in param")
+            };
 
-                Ok(Param::Rest(s))
-            } else {
-                eprintln!("3");
-                Err(ParseError::UnexpectedToken(first))
-            }
-        }
-        _ => {
-            eprintln!("4");
+            Ok(Param::Rest(s))
+        } else {
+            eprintln!("3");
             Err(ParseError::UnexpectedToken(first))
         }
+    } else {
+        eprintln!("4");
+        Err(ParseError::UnexpectedToken(first))
     }
 }
 
@@ -789,7 +740,7 @@ fn parse_infix(
 
             if operator.position != OperatorPosition::Infix {
                 eprintln!("5");
-                return Err(ParseError::UnexpectedToken(s.to_value1()));
+                return Err(ParseError::UnexpectedToken(s.to_object()));
             }
 
             let rhs = parse_infix(interpreter, scope, stream)?;
@@ -859,10 +810,10 @@ fn parse_factor(
 
                 Expr::Access {
                     base: Box::new(subject),
-                    key: ValueOrExpr::Value(s.to_value1()),
+                    key: ValueOrExpr::Value(s.to_object()),
                 }
             }
-            Some(Value::Object(v)) if v.is::<value2::Vec>() => {
+            Some(v) if v.is::<value2::Vec>() => {
                 let v = v.downcast::<value2::Vec>().unwrap();
                 stream.next();
 
@@ -880,13 +831,7 @@ fn parse_factor(
                 let key = parse_term(
                     interpreter,
                     scope,
-                    &mut TokenStream::new(
-                        term_tokens
-                            .iter()
-                            .map(|v| v.clone().to_value1())
-                            .collect::<HamtVec<_>>()
-                            .as_slice(),
-                    ),
+                    &mut TokenStream::new(term_tokens.as_slice()),
                 )?;
 
                 Expr::Access {
@@ -894,7 +839,7 @@ fn parse_factor(
                     key: ValueOrExpr::Expr(Box::new(key)),
                 }
             }
-            Some(Value::Object(args)) if args.is::<Tuple>() => {
+            Some(args) if args.is::<Tuple>() => {
                 let args = args.downcast::<Tuple>().unwrap();
                 stream.next();
 
@@ -907,12 +852,7 @@ fn parse_factor(
                                 interpreter,
                                 scope,
                                 &mut TokenStream::new(
-                                    v.downcast::<value2::Vec>()
-                                        .unwrap()
-                                        .iter()
-                                        .map(|v| v.clone().to_value1())
-                                        .collect::<HamtVec<_>>()
-                                        .as_slice(),
+                                    v.downcast::<value2::Vec>().unwrap().as_slice(),
                                 ),
                             )
                         } else {
@@ -941,33 +881,37 @@ fn parse_element(
 ) -> Result<Expr, ParseError> {
     let first = stream.next().unwrap();
 
-    let r = match first {
-        Value::Object(m) if m.type_id() == Map::TYPE_ID => Expr::Map({
-            let m = m.downcast::<Map>().unwrap();
+    let r = if first.is::<Map>() {
+        Expr::Map({
+            let m = first.downcast::<Map>().unwrap();
             let mut hm = HamtVec::new();
             for (k, v) in m.iter() {
-                let k = match k.clone().to_value1() {
-                    Value::Object(s) if s.is::<Symbol>() => Expr::Symbol(s.downcast::<Symbol>().unwrap().clone()),
-                    Value::Object(o) if o.type_id() == value2::String::TYPE_ID => Expr::String(o.downcast::<value2::String>().map(|v| v.value.clone()).unwrap()),
-                    // Simple parenthetical
-                    Value::Object(t) if t.downcast::<Tuple>().map(|t| t.len() == 1) == Some(true) => {
-                        let t = t.downcast::<Tuple>().unwrap();
-                        let Some(v_tokens) = t.data().get(0).unwrap().downcast::<value2::Vec>() else {
-                            panic!("expected vector in tuple");
-                        };
+                let k = if k.is::<Symbol>() {
+                    Expr::Symbol(k.downcast::<Symbol>().unwrap().clone())
+                } else if k.is::<value2::String>() {
+                    Expr::String(
+                        k.downcast::<value2::String>()
+                            .map(|v| v.value.clone())
+                            .unwrap(),
+                    )
+                } else if k.downcast::<Tuple>().map(|t| t.len() == 1) == Some(true) {
+                    let t = k.downcast::<Tuple>().unwrap();
+                    let t = t.data().as_slice();
+                    let Some(v_tokens) = t.get(0).unwrap().downcast::<value2::Vec>() else {
+                        panic!("expected vector in tuple");
+                    };
 
-                        parse_expr(
-                            interpreter,
-                            scope,
-                            &mut TokenStream::new(v_tokens.iter().map(|v| v.clone().to_value1()).collect::<HamtVec<_>>().as_slice()),
-                        )?
-                    },
-                    // True tuple
-                    Value::Object(t) if t.is::<Tuple>() => {
-                        let t = t.downcast::<Tuple>().unwrap();
+                    parse_expr(
+                        interpreter,
+                        scope,
+                        &mut TokenStream::new(v_tokens.as_slice()),
+                    )?
+                } else if k.is::<Tuple>() {
+                    let t = k.downcast::<Tuple>().unwrap();
 
-                            Expr::Tuple(
-                        t.data().iter()
+                    Expr::Tuple(
+                        t.data()
+                            .iter()
                             .map(|v| {
                                 let Some(v_tokens) = v.downcast::<value2::Vec>() else {
                                     panic!("expected vector in map");
@@ -976,19 +920,17 @@ fn parse_element(
                                 let v = parse_expr(
                                     interpreter,
                                     scope,
-                                    &mut TokenStream::new(v_tokens.iter().map(|v| v.clone().to_value1()).collect::<HamtVec<_>>().as_slice()),
+                                    &mut TokenStream::new(v_tokens.as_slice()),
                                 )?;
 
                                 Ok(v)
                             })
                             .collect::<Result<HamtVec<Expr>, ParseError>>()?,
-                    )},
-                    Value::Object(o) if o.type_id() == Legacy::TYPE_ID => {
-                        panic!("Unexpected legacy object {:?} in Map", o.downcast::<Legacy>().unwrap().value())
-                    }
-                    v => panic!(
+                    )
+                } else {
+                    panic!(
                         "expected symbol, string, tuple, or parenthesized expression on left-hand side of map, but found {:?}", v
-                    ),
+                    )
                 };
 
                 let Some(v_tokens) = v.downcast::<value2::Vec>() else {
@@ -998,156 +940,112 @@ fn parse_element(
                 let v = parse_expr(
                     interpreter,
                     scope,
-                    &mut TokenStream::new(
-                        v_tokens
-                            .iter()
-                            .map(|v| v.clone().to_value1())
-                            .collect::<HamtVec<_>>()
-                            .as_slice(),
-                    ),
+                    &mut TokenStream::new(v_tokens.as_slice()),
                 )?;
 
                 hm = hm.push((k, v));
             }
             hm
-        }),
-        Value::Object(s) if s.type_id() == Set::TYPE_ID => {
-            let s = s.downcast::<Set>().unwrap();
-            let mut hs = HamtSet::new();
-            for v in s.iter() {
-                let v = v.clone().to_value1();
-                let Some(v_tokens) = v.downcast::<value2::Vec>() else {
-                    panic!("expected vector in set");
-                };
+        })
+    } else if first.is::<Set>() {
+        let s = first.downcast::<Set>().unwrap();
+        let mut hs = HamtSet::new();
+        for v in s.iter() {
+            let Some(v_tokens) = v.downcast::<value2::Vec>() else {
+                panic!("expected vector in set");
+            };
 
-                let v = parse_expr(
-                    interpreter,
-                    scope,
-                    &mut TokenStream::new(
-                        v_tokens
-                            .iter()
-                            .map(|v| v.clone().to_value1())
-                            .collect::<HamtVec<_>>()
-                            .as_slice(),
-                    ),
-                )?;
-
-                hs = hs.insert(v);
-            }
-
-            Expr::Set(hs)
-        }
-        Value::Object(v) if v.is::<value2::Vec>() => {
-            let v = v.downcast::<value2::Vec>().unwrap();
-            let mut hv = HamtVec::new();
-            for v in v.iter() {
-                let Some(v_tokens) = v.downcast::<value2::Vec>() else {
-                    panic!("expected vector in vector");
-                };
-
-                let v = parse_expr(
-                    interpreter,
-                    scope,
-                    &mut TokenStream::new(
-                        v_tokens
-                            .iter()
-                            .map(|v| v.clone().to_value1())
-                            .collect::<HamtVec<_>>()
-                            .as_slice(),
-                    ),
-                )?;
-
-                hv = hv.push(v);
-            }
-
-            Expr::Vec(hv)
-        }
-        // Simple parenthetical
-        Value::Object(t) if t.downcast::<Tuple>().map(|t| t.len() <= 1) == Some(true) => {
-            let t = t.downcast::<Tuple>().unwrap();
-            let contents =
-                if let Some(v_tokens) = t.data().get(0).and_then(|v| v.downcast::<value2::Vec>()) {
-                    v_tokens.clone()
-                } else {
-                    value2::Vec::default()
-                };
-
-            parse_expr(
+            let v = parse_expr(
                 interpreter,
                 scope,
-                &mut TokenStream::new(
-                    contents
-                        .iter()
-                        .map(|v| v.clone().to_value1())
-                        .collect::<HamtVec<_>>()
-                        .as_slice(),
-                ),
-            )?
-        }
-        // True tuple
-        Value::Object(t) if t.is::<Tuple>() => {
-            let t = t.downcast::<Tuple>().unwrap();
-            let mut hv = HamtVec::new();
-            for v in t.data().iter() {
-                let Some(v_tokens) = v.downcast::<value2::Vec>() else {
-                    panic!("expected vector in tuple");
-                };
+                &mut TokenStream::new(v_tokens.as_slice()),
+            )?;
 
-                hv = hv.push(parse_expr(
-                    interpreter,
-                    scope,
-                    &mut TokenStream::new(
-                        v_tokens
-                            .iter()
-                            .map(|v| v.clone().to_value1())
-                            .collect::<HamtVec<_>>()
-                            .as_slice(),
-                    ),
-                )?);
-            }
+            hs = hs.insert(v);
+        }
 
-            Expr::Tuple(hv)
-        }
-        Value::Object(n) if n.is::<i64>() => Expr::Number(*n.downcast::<i64>().unwrap()),
-        Value::Object(b) if b.type_id() == bool::TYPE_ID => {
-            Expr::Boolean(*b.downcast::<bool>().unwrap())
-        }
-        Value::Object(o) if o.type_id() == value2::String::TYPE_ID => Expr::String(
-            o.downcast::<value2::String>()
-                .map(|v| v.value.clone())
-                .unwrap(),
-        ),
-        Value::Object(s) if s.is::<Symbol>() => {
-            let s = s.downcast::<Symbol>().unwrap();
+        Expr::Set(hs)
+    } else if first.is::<value2::Vec>() {
+        let v = first.downcast::<value2::Vec>().unwrap();
+        let mut hv = HamtVec::new();
+        for v in v.iter() {
+            let Some(v_tokens) = v.downcast::<value2::Vec>() else {
+                panic!("expected vector in vector");
+            };
 
-            match s.name.deref() {
-                "true" => Expr::Boolean(true),
-                "false" => Expr::Boolean(false),
-                "nil" => Expr::Nil,
-                _ => Expr::Name(s.clone()),
-            }
-        }
-        Value::Object(b) if b.is::<Block>() => Expr::Block(b.downcast::<Block>().unwrap().clone()),
-        // Value::Sigil(Sigil { text }) if text.deref() == "..." => todo!(),
-        Value::Object(s) if s.is::<Sigil>() => {
-            let s = s.downcast::<Sigil>().unwrap();
+            let v = parse_expr(
+                interpreter,
+                scope,
+                &mut TokenStream::new(v_tokens.as_slice()),
+            )?;
 
-            unreachable!(
-                "sigil '{}' should have been reached at higher parse stages",
-                s.text(interpreter),
-            )
+            hv = hv.push(v);
         }
-        Value::Object(o) => match o.type_name() {
-            value2::String::NAME => Expr::String(
-                o.downcast::<value2::String>()
-                    .map(|v| v.value.clone())
-                    .unwrap(),
-            ),
-            _ => unreachable!(
-                "object of type '{}' cannot be constructed by lexer",
-                o.type_name()
-            ),
-        },
+
+        Expr::Vec(hv)
+    } else if first.downcast::<Tuple>().map(|t| t.len() <= 1) == Some(true) {
+        let t = first.downcast::<Tuple>().unwrap();
+        let contents = if let Some(v_tokens) = t
+            .data()
+            .as_slice()
+            .get(0)
+            .and_then(|v| v.downcast::<value2::Vec>())
+        {
+            v_tokens.clone()
+        } else {
+            value2::Vec::default()
+        };
+
+        parse_expr(
+            interpreter,
+            scope,
+            &mut TokenStream::new(contents.as_slice()),
+        )?
+    } else if first.is::<Tuple>() {
+        let t = first.downcast::<Tuple>().unwrap();
+        let mut hv = HamtVec::new();
+        for v in t.data().iter() {
+            let Some(v_tokens) = v.downcast::<value2::Vec>() else {
+                panic!("expected vector in tuple");
+            };
+
+            hv = hv.push(parse_expr(
+                interpreter,
+                scope,
+                &mut TokenStream::new(v_tokens.as_slice()),
+            )?);
+        }
+
+        Expr::Tuple(hv)
+    } else if first.is::<i64>() {
+        Expr::Number(*first.downcast::<i64>().unwrap())
+    } else if first.is::<bool>() {
+        Expr::Boolean(*first.downcast::<bool>().unwrap())
+    } else if first.is::<value2::String>() {
+        Expr::String(first.downcast::<value2::String>().unwrap().value.clone())
+    } else if first.is::<Symbol>() {
+        let s = first.downcast::<Symbol>().unwrap();
+
+        match s.name.deref() {
+            "true" => Expr::Boolean(true),
+            "false" => Expr::Boolean(false),
+            "nil" => Expr::Nil,
+            _ => Expr::Name(s.clone()),
+        }
+    } else if first.is::<Block>() {
+        Expr::Block(first.downcast::<Block>().unwrap().clone())
+    } else if first.is::<Sigil>() {
+        let s = first.downcast::<Sigil>().unwrap();
+
+        unreachable!(
+            "sigil '{}' should have been reached at higher parse stages",
+            s.text(interpreter),
+        )
+    } else {
+        unreachable!(
+            "object of type '{}' cannot be constructed by lexer",
+            first.type_name()
+        )
     };
 
     Ok(r)
@@ -1188,30 +1086,30 @@ fn is_keyword_macro(interpreter: &Interpreter, scope: &Scope, s: &Symbol) -> boo
 }
 
 pub struct TokenStream {
-    tokens: HamtVecSlice<Value>,
+    tokens: Slice,
     peek_idx: usize,
 }
 
 impl TokenStream {
-    pub fn new(tokens: HamtVecSlice<Value>) -> Self {
+    pub fn new(tokens: Slice) -> Self {
         Self {
             tokens,
             peek_idx: 0,
         }
     }
 
-    pub fn unwrap(&self) -> HamtVecSlice<Value> {
+    pub fn unwrap(&self) -> Slice {
         self.tokens.clone()
     }
 
-    pub fn drain(&mut self) -> HamtVecSlice<Value> {
+    pub fn drain(&mut self) -> Slice {
         let tokens = self.tokens.clone();
-        self.tokens = HamtVec::new().as_slice();
+        self.tokens = value2::Vec::default().as_slice();
         self.peek_idx = 0;
         tokens
     }
 
-    pub fn next(&mut self) -> Option<Value> {
+    pub fn next(&mut self) -> Option<Arc<Object>> {
         if !self.tokens.is_empty() {
             let token = self.tokens.get(0).cloned();
             self.tokens = self.tokens.slice(1..);
@@ -1227,7 +1125,7 @@ impl TokenStream {
         }
     }
 
-    pub fn peek(&mut self) -> Option<Value> {
+    pub fn peek(&mut self) -> Option<Arc<Object>> {
         if self.peek_idx >= self.tokens.len() {
             None
         } else {

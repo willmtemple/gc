@@ -13,7 +13,7 @@ impl Value for bool {
 
     fn to_string(&self, _interpreter: &mut crate::Interpreter) -> crate::InterpreterResult {
         crate::InterpreterResult::Value(
-            super::String::from(if *self { "true" } else { "false" }).to_value1(),
+            super::String::from(if *self { "true" } else { "false" }).to_object(),
         )
     }
 }

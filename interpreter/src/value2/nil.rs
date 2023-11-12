@@ -12,6 +12,6 @@ impl Value for Nil {
     }
 
     fn to_string(&self, _: &mut Interpreter) -> InterpreterResult {
-        InterpreterResult::Value(super::String::from("nil").to_value1())
+        InterpreterResult::Value(super::String::from("nil").to_object())
     }
 }

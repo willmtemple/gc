@@ -1,28 +1,29 @@
 use std::sync::Arc;
 
-use hamt::HamtVec;
-
 use crate::{InterpreterError, InterpreterResult};
 
 use super::{Object, Value};
 
-use crate::Value as Value1;
-
 pub struct Tuple {
-    data: HamtVec<Arc<Object>>,
+    data: super::Vec,
 }
 
 impl Tuple {
-    pub fn new(data: HamtVec<Arc<Object>>) -> Self {
+    pub fn new(data: super::Vec) -> Self {
         Self { data }
     }
 
-    pub fn data(&self) -> &HamtVec<Arc<Object>> {
+    pub fn data(&self) -> &super::Vec {
         &self.data
     }
 
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -37,7 +38,7 @@ impl Value for Tuple {
         let index = match index.downcast::<i64>() {
             Some(n @ 0..) => *n as usize,
             Some(n) => {
-                return InterpreterResult::Error(InterpreterError::InvalidIndex(n.to_value1()));
+                return InterpreterResult::Error(InterpreterError::InvalidIndex(n.to_object()));
             }
             None => {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
@@ -49,11 +50,11 @@ impl Value for Tuple {
 
         if index >= self.data.len() {
             return InterpreterResult::Error(InterpreterError::InvalidIndex(
-                (index as i64).to_value1(),
+                (index as i64).to_object(),
             ));
         }
 
-        InterpreterResult::Value(self.data[index].clone().to_value1())
+        InterpreterResult::Value(self.data[index].clone())
     }
 
     fn to_string(&self, interpreter: &mut crate::Interpreter) -> InterpreterResult {
@@ -62,22 +63,18 @@ impl Value for Tuple {
         for v in self.data.iter() {
             let vs = v.to_string(interpreter)?;
 
-            let Value1::Object(vo) = vs else {
-                panic!("Expected to_string to return a string.");
-            };
-
-            if !vo.is::<super::String>() {
+            if !vs.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
                     expected: super::String::NAME,
-                    actual: vo.type_name(),
+                    actual: vs.type_name(),
                 });
             }
 
-            parts.push(vo.downcast::<super::String>().unwrap().value.clone());
+            parts.push(vs.downcast::<super::String>().unwrap().value.clone());
         }
 
         InterpreterResult::Value(
-            crate::value2::String::from(format!("({})", parts.join(", "))).to_value1(),
+            crate::value2::String::from(format!("({})", parts.join(", "))).to_object(),
         )
     }
 }

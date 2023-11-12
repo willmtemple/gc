@@ -1,14 +1,12 @@
-use std::sync::Arc;
-
 use hamt::HamtVec;
 
 use crate::{value2, Interpreter};
 
-use super::{Object, Value};
+use super::Value;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Block {
-    pub body: HamtVec<Arc<Object>>,
+    pub body: value2::Vec,
 }
 
 impl Block {

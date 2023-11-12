@@ -4,7 +4,10 @@ use std::{ops::Deref, sync::Arc, sync::OnceLock};
 
 use hamt::HamtMap;
 
-use crate::{ast::Attribute, value::Value, value2::Symbol};
+use crate::{
+    ast::Attribute,
+    value2::{Object, Symbol},
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Scope {
@@ -30,7 +33,7 @@ impl Scope {
     //     }
     // }
 
-    pub fn resolve(&self, sym: &Symbol) -> Option<&Value> {
+    pub fn resolve(&self, sym: &Symbol) -> Option<&Arc<Object>> {
         self.get_binding(sym)
             .and_then(|binding| binding.value.get())
     }
@@ -75,7 +78,7 @@ impl Scope {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Binding {
     pub symbol: Symbol,
-    pub value: OnceLock<Value>,
+    pub value: OnceLock<Arc<Object>>,
     pub attributes: HamtMap<Symbol, Attribute>,
     // metadata: HamtMap<Symbol, Value>,
 }

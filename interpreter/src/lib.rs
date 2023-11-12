@@ -18,14 +18,14 @@ enum ExitCode {
 use ast::{
     parse_exprs, seglisp_body_to_block, Expr, Operator, OperatorPosition, ParseError, TokenStream,
 };
-use hamt::{config::CloningConfig, vec::HamtVecSlice, HamtMap, HamtVec};
+use hamt::{config::CloningConfig, HamtMap, HamtVec};
 use list::List;
 use scope::Scope;
 use seglisp::{
     diagnostics::format_and_write_diagnostics_with_termcolor, read_str, ReaderConfiguration,
 };
 use value2::{
-    to_value1_args, Block, Function, Map, NativeObject, Nil, Object, Set, Sigil, Symbol, Tuple,
+    Block, Function, Map, NativeObject, Nil, Object, Set, Sigil, Slice, Symbol, Tuple,
     Value as Value2,
 };
 
@@ -36,10 +36,7 @@ mod list;
 mod locals;
 mod scope;
 mod stm;
-mod value;
 pub mod value2;
-
-pub use value::Value;
 
 pub enum WriteTarget {
     Out,
@@ -112,10 +109,10 @@ pub enum InterpreterError {
     ModuleNotFound(PathBuf),
     ReadError,
     ParseError(ParseError),
-    UncallableValue(Value),
+    UncallableValue(Arc<Object>),
     UnexpectedControlFlow(ControlFlow),
-    NotIndexable(Value),
-    InvalidIndex(Value),
+    NotIndexable(Arc<Object>),
+    InvalidIndex(Arc<Object>),
     ProtocolNotImplemented(&'static str, &'static str),
     InvalidArity(usize, usize),
     UnexpectedType {
@@ -125,7 +122,7 @@ pub enum InterpreterError {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub enum InterpreterResult<V = Value> {
+pub enum InterpreterResult<V = Arc<Object>> {
     Value(V),
     Control(ControlFlow),
     Error(InterpreterError),
@@ -218,8 +215,8 @@ where
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum ControlFlow {
-    Return(Value),
-    Break(Value),
+    Return(Arc<Object>),
+    Break(Arc<Object>),
     Continue,
 }
 
@@ -282,7 +279,7 @@ impl Interpreter {
             .deref()
     }
 
-    fn run_boot_file(&mut self, scope: &mut Scope) -> Result<Value, InterpreterError> {
+    fn run_boot_file(&mut self, scope: &mut Scope) -> Result<Arc<Object>, InterpreterError> {
         let config = ReaderConfiguration::default();
 
         let module_path = self.host.load_boot_module();
@@ -325,14 +322,17 @@ impl Interpreter {
 
                             let s = argument.to_string(interpreter)?;
 
-                            let s = s.print(interpreter, 1);
+                            let s = s.to_string(interpreter)?;
 
-                            interpreter.host.write_std(WriteTarget::Out, &s);
+                            interpreter.host.write_std(
+                                WriteTarget::Out,
+                                &s.downcast::<value2::String>().unwrap().value,
+                            );
                         }
 
                         interpreter.host.write_std(WriteTarget::Out, "\n");
 
-                        InterpreterResult::Value(Nil.to_value1())
+                        InterpreterResult::Value(Nil.to_object())
                     })
                     .to_object(),
             );
@@ -341,8 +341,7 @@ impl Interpreter {
                 Symbol::new("bind_operator").to_object(),
                 NativeObject::new()
                     .with_call(|interpreter, arguments| {
-                        let arguments = to_value1_args(arguments);
-                        let Some(f @ Value::Object(_)) = arguments.get(0) else {
+                        let Some(f) = arguments.get(0) else {
                             panic!("First argument to bind_operator should be an object.")
                         };
 
@@ -379,7 +378,7 @@ impl Interpreter {
                             },
                         );
 
-                        InterpreterResult::Value(Nil.to_value1())
+                        InterpreterResult::Value(Nil.to_object())
                     })
                     .to_object(),
             );
@@ -388,11 +387,10 @@ impl Interpreter {
                 Symbol::new("egal").to_object(),
                 NativeObject::new()
                     .with_call(|_, arguments| {
-                        let arguments = to_value1_args(arguments);
-                        let a = arguments.get(0).cloned().unwrap_or(Nil.to_value1());
-                        let b = arguments.get(1).cloned().unwrap_or(Nil.to_value1());
+                        let a = arguments.get(0).cloned().unwrap_or(Nil.to_object());
+                        let b = arguments.get(1).cloned().unwrap_or(Nil.to_object());
 
-                        InterpreterResult::Value((a == b).to_value1())
+                        InterpreterResult::Value((a == b).to_object())
                     })
                     .to_object(),
             );
@@ -401,7 +399,6 @@ impl Interpreter {
                 Symbol::new("load_module").to_object(),
                 NativeObject::new()
                     .with_call(|interpreter, arguments| {
-                        let arguments = to_value1_args(arguments);
                         let Some(path) = arguments
                             .get(3)
                             .and_then(|v| v.downcast::<value2::String>())
@@ -447,7 +444,6 @@ impl Interpreter {
                 Symbol::new("gensym").to_object(),
                 NativeObject::new()
                     .with_call(|_, arguments| {
-                        let arguments = to_value1_args(arguments);
                         let Some(prefix) = arguments
                             .get(3)
                             .and_then(|v| v.downcast::<value2::String>())
@@ -456,7 +452,7 @@ impl Interpreter {
                             panic!("First argument to gensym should be a string.")
                         };
 
-                        InterpreterResult::Value(Symbol::new(prefix).to_value1())
+                        InterpreterResult::Value(Symbol::new(prefix).to_object())
                     })
                     .to_object(),
             );
@@ -465,7 +461,6 @@ impl Interpreter {
                 Symbol::new("get_type_name").to_object(),
                 NativeObject::new()
                     .with_call(|_, arguments| {
-                        let arguments = to_value1_args(arguments);
                         if arguments.len() != 1 {
                             panic!("get_type_name expects exactly one argument.");
                         }
@@ -473,7 +468,7 @@ impl Interpreter {
                         let value = arguments.get(0).unwrap();
 
                         InterpreterResult::Value(
-                            value2::String::from(value.type_name()).to_value1(),
+                            value2::String::from(value.type_name()).to_object(),
                         )
                     })
                     .to_object(),
@@ -482,16 +477,20 @@ impl Interpreter {
             sys = sys.insert(
                 Symbol::new("panic").to_object(),
                 NativeObject::new()
-                    .with_call(|interpreter, args| {
-                        let arguments = to_value1_args(args);
+                    .with_call(|_, arguments| {
                         if arguments.len() != 1 {
                             panic!("panic expects exactly one argument.");
                         }
 
-                        let value = arguments.get(0).unwrap();
+                        let Some(message) = arguments
+                            .get(0)
+                            .and_then(|v| v.downcast::<value2::String>())
+                        else {
+                            panic!("Argument to panic must be a string.")
+                        };
 
                         eprintln!("Panic.");
-                        eprintln!("{}", value.print(interpreter, 1));
+                        eprintln!("{}", message.value);
 
                         exit(ExitCode::Panic as i32);
                     })
@@ -503,7 +502,6 @@ impl Interpreter {
                 Symbol::new("len").to_object(),
                 NativeObject::new()
                     .with_call(|_, args| {
-                        let args = to_value1_args(args);
                         if args.len() != 1 {
                             panic!("len expects exactly one argument.");
                         }
@@ -514,7 +512,7 @@ impl Interpreter {
                             panic!("Argument to len must be an array.")
                         };
 
-                        InterpreterResult::Value((data.len() as i64).to_value1())
+                        InterpreterResult::Value((data.len() as i64).to_object())
                     })
                     .to_object(),
             );
@@ -524,7 +522,6 @@ impl Interpreter {
                 Symbol::new("slice").to_object(),
                 NativeObject::new()
                     .with_call(|_, args| {
-                        let args = to_value1_args(args);
                         if args.len() != 3 {
                             panic!("slice expects exactly three arguments.");
                         }
@@ -548,7 +545,7 @@ impl Interpreter {
                         let data = data.slice((*start as usize)..(*end as usize));
 
                         InterpreterResult::Value(
-                            data.iter().cloned().collect::<value2::Vec>().to_value1(),
+                            data.iter().cloned().collect::<value2::Vec>().to_object(),
                         )
                     })
                     .to_object(),
@@ -559,7 +556,6 @@ impl Interpreter {
                 Symbol::new("add").to_object(),
                 NativeObject::new()
                     .with_call(|_, args| {
-                        let args = to_value1_args(args);
                         if args.len() != 2 {
                             panic!("add expects exactly two arguments.");
                         }
@@ -575,7 +571,7 @@ impl Interpreter {
                             panic!("Second argument to add must be a number.")
                         };
 
-                        InterpreterResult::Value((*l + *r).to_value1())
+                        InterpreterResult::Value((*l + *r).to_object())
                     })
                     .to_object(),
             );
@@ -585,7 +581,6 @@ impl Interpreter {
                 Symbol::new("sub").to_object(),
                 NativeObject::new()
                     .with_call(|_, args| {
-                        let args = to_value1_args(args);
                         if args.len() != 2 {
                             panic!("sub expects exactly two arguments.");
                         }
@@ -601,7 +596,7 @@ impl Interpreter {
                             panic!("Second argument to sub must be a number.")
                         };
 
-                        InterpreterResult::Value((*l - *r).to_value1())
+                        InterpreterResult::Value((*l - *r).to_object())
                     })
                     .to_object(),
             );
@@ -610,7 +605,6 @@ impl Interpreter {
                 Symbol::new("def_local").to_object(),
                 NativeObject::new()
                     .with_call(|interpreter, args| {
-                        let args = to_value1_args(args);
                         InterpreterResult::Value(locals::def_local(interpreter, args))
                     })
                     .to_object(),
@@ -620,7 +614,6 @@ impl Interpreter {
                 Symbol::new("get_local").to_object(),
                 NativeObject::new()
                     .with_call(|interpreter, args| {
-                        let args = to_value1_args(args);
                         InterpreterResult::Value(locals::get_local(interpreter, args))
                     })
                     .to_object(),
@@ -630,7 +623,6 @@ impl Interpreter {
                 Symbol::new("set_local").to_object(),
                 NativeObject::new()
                     .with_call(|interpreter, args| {
-                        let args = to_value1_args(args);
                         InterpreterResult::Value(locals::set_local(interpreter, args))
                     })
                     .to_object(),
@@ -641,16 +633,13 @@ impl Interpreter {
                 Symbol::new("str").to_object(),
                 NativeObject::new()
                     .with_call(|interpreter, args| {
-                        let args = to_value1_args(args);
                         if args.len() != 1 {
                             panic!("str expects exactly one argument.");
                         }
 
                         let value = args.get(0).unwrap();
 
-                        InterpreterResult::Value(
-                            value2::String::from(value.print(interpreter, 0)).to_value1(),
-                        )
+                        InterpreterResult::Value(value.to_string(interpreter)?)
                     })
                     .to_object(),
             );
@@ -658,7 +647,7 @@ impl Interpreter {
             scope
                 .define(&Symbol::new("__sys"))
                 .value
-                .set(sys.to_value1())
+                .set(sys.to_object())
                 .expect("failed to bind __sys metaprotocol object");
 
             // scope
@@ -679,16 +668,16 @@ impl Interpreter {
             //                     );
             //                 }
 
-            //                 InterpreterResult::Value(Nil.to_value1())
+            //                 InterpreterResult::Value(Nil.to_object())
             //             })
-            //             .to_value1(),
+            //             .to_object(),
             //     )
             //     .expect("failed to set _p");
 
             scope
                 .define(&Symbol::new("__tokens"))
                 .value
-                .set(module.clone().to_value1())
+                .set(module.clone().to_object())
                 .expect("fatal error: __tokens binding is already set, somehow");
 
             self.call_stack = self.call_stack.push_start(CallFrame {
@@ -710,7 +699,7 @@ impl Interpreter {
     pub fn read_and_eval_module(
         &mut self,
         path: impl AsRef<Path>,
-    ) -> Result<Value, InterpreterError> {
+    ) -> Result<Arc<Object>, InterpreterError> {
         let config = ReaderConfiguration::default();
 
         let text = self
@@ -756,20 +745,14 @@ impl Interpreter {
 
     fn eval_expr(&mut self, scope: &mut Scope, expr: &Expr) -> InterpreterResult {
         let v = match expr {
-            Expr::Quote(tokens) => quote_substitute(self, scope, tokens.clone())?
-                .iter()
-                .map(|v| v.to_value2())
-                .collect::<value2::Vec>()
-                .to_value1(),
-            Expr::Fn { name, params, body } => Value::Object(
-                Function {
-                    name: name.as_ref().map(|v| v.name.clone()),
-                    params: params.clone(),
-                    body: body.clone(),
-                    scope: scope.clone(),
-                }
-                .to_object(),
-            ),
+            Expr::Quote(tokens) => quote_substitute(self, scope, tokens.clone())?.to_object(),
+            Expr::Fn { name, params, body } => Function {
+                name: name.as_ref().map(|v| v.name.clone()),
+                params: params.clone(),
+                body: body.clone(),
+                scope: scope.clone(),
+            }
+            .to_object(),
             Expr::Let { name, value, r#in } => {
                 let v = self.eval_expr(scope, value)?;
 
@@ -780,7 +763,7 @@ impl Interpreter {
                 if let Some(body) = r#in {
                     self.eval_expr(scope, body)?
                 } else {
-                    Nil.to_value1()
+                    Nil.to_object()
                 }
             }
             Expr::If {
@@ -790,14 +773,10 @@ impl Interpreter {
             } => {
                 let condition = self.eval_expr(scope, condition)?;
 
-                let cr = if let Value::Object(o) = condition {
-                    if o.is::<Nil>() {
-                        false
-                    } else if o.is::<bool>() {
-                        *o.downcast::<bool>().unwrap()
-                    } else {
-                        true
-                    }
+                let cr = if condition.is::<Nil>() {
+                    false
+                } else if condition.is::<bool>() {
+                    *condition.downcast::<bool>().unwrap()
                 } else {
                     true
                 };
@@ -807,46 +786,40 @@ impl Interpreter {
                 } else if let Some(r#else) = r#else {
                     self.eval_expr(scope, r#else)?
                 } else {
-                    Nil.to_value1()
+                    Nil.to_object()
                 }
             }
             Expr::Map(m) => m
                 .iter()
                 .map(|(k, v)| -> InterpreterResult<(Arc<Object>, Arc<Object>)> {
                     InterpreterResult::Value((
-                        self.eval_expr(&mut scope.clone(), k)?.to_value2(),
-                        self.eval_expr(&mut scope.clone(), v)?.to_value2(),
+                        self.eval_expr(&mut scope.clone(), k)?,
+                        self.eval_expr(&mut scope.clone(), v)?,
                     ))
                 })
                 .collect::<InterpreterResult<Map>>()?
-                .to_value1(),
+                .to_object(),
 
             Expr::Set(s) => s
                 .iter()
-                .map(|v| {
-                    InterpreterResult::Value(self.eval_expr(&mut scope.clone(), v)?.to_value2())
-                })
+                .map(|v| InterpreterResult::Value(self.eval_expr(&mut scope.clone(), v)?))
                 .collect::<InterpreterResult<Set>>()?
-                .to_value1(),
+                .to_object(),
             Expr::Vec(v) => v
                 .iter()
-                .map(|v| {
-                    InterpreterResult::Value(self.eval_expr(&mut scope.clone(), v)?.to_value2())
-                })
+                .map(|v| InterpreterResult::Value(self.eval_expr(&mut scope.clone(), v)?))
                 .collect::<InterpreterResult<value2::Vec>>()?
-                .to_value1(),
+                .to_object(),
             Expr::Tuple(t) => Tuple::new(
                 t.iter()
-                    .map(|v| {
-                        InterpreterResult::Value(self.eval_expr(&mut scope.clone(), v)?.to_value2())
-                    })
-                    .collect::<InterpreterResult<HamtVec<Arc<Object>>>>()?,
+                    .map(|v| InterpreterResult::Value(self.eval_expr(&mut scope.clone(), v)?))
+                    .collect::<InterpreterResult<value2::Vec>>()?,
             )
-            .to_value1(),
-            Expr::Number(n) => n.to_value1(),
-            Expr::Boolean(b) => b.to_value1(),
-            Expr::String(s) => value2::String::from(s.clone()).to_value1(),
-            Expr::Symbol(s) => s.clone().to_value1(),
+            .to_object(),
+            Expr::Number(n) => n.to_object(),
+            Expr::Boolean(b) => b.to_object(),
+            Expr::String(s) => value2::String::from(s.clone()).to_object(),
+            Expr::Symbol(s) => s.clone().to_object(),
             Expr::Name(n) => scope
                 .resolve(n)
                 .unwrap_or_else(|| {
@@ -862,7 +835,7 @@ impl Interpreter {
                     ast::ValueOrExpr::Expr(e) => self.eval_expr(scope, e)?,
                 };
 
-                base.get(self, &key)
+                base.get(self, key)?
             }
             Expr::Call { callee, args } => {
                 let callee = match callee {
@@ -883,29 +856,26 @@ impl Interpreter {
                                 return vec![v];
                             };
 
-                            match v {
-                                Value::Object(v) if v.type_id() == value2::Vec::TYPE_ID => v
-                                    .downcast::<value2::Vec>()
+                            if v.is::<value2::Vec>() {
+                                v.downcast::<value2::Vec>()
                                     .unwrap()
                                     .iter()
                                     .cloned()
-                                    .map(|v| InterpreterResult::Value(v.to_value1()))
-                                    .collect(),
-                                Value::Object(v) if v.is::<Tuple>() => {
-                                    let v = v.downcast::<Tuple>().unwrap();
-                                    v.data()
-                                        .iter()
-                                        .cloned()
-                                        .map(|v| InterpreterResult::Value(v.to_value1()))
-                                        .collect()
-                                }
-                                _ => vec![InterpreterResult::Error(
-                                    InterpreterError::NotIndexable(v),
-                                )],
+                                    .map(InterpreterResult::Value)
+                                    .collect()
+                            } else if v.is::<Tuple>() {
+                                let v = v.downcast::<Tuple>().unwrap();
+                                v.data()
+                                    .iter()
+                                    .cloned()
+                                    .map(InterpreterResult::Value)
+                                    .collect()
+                            } else {
+                                vec![InterpreterResult::Error(InterpreterError::NotIndexable(v))]
                             }
                         }
                     })
-                    .collect::<InterpreterResult<HamtVec<Value>>>()?;
+                    .collect::<InterpreterResult<value2::Vec>>()?;
 
                 callee.call(self, args.as_slice())?
             }
@@ -929,7 +899,7 @@ impl Interpreter {
                     if let Some(v) = value {
                         self.eval_expr(scope, v)?
                     } else {
-                        Nil.to_value1()
+                        Nil.to_object()
                     }
                 }))
             }
@@ -941,11 +911,11 @@ impl Interpreter {
                     if let Some(v) = value {
                         self.eval_expr(scope, v)?
                     } else {
-                        Nil.to_value1()
+                        Nil.to_object()
                     }
                 }))
             }
-            Expr::Nil => Nil.to_value1(),
+            Expr::Nil => Nil.to_object(),
         };
 
         InterpreterResult::Value(v)
@@ -954,24 +924,15 @@ impl Interpreter {
     pub fn eval_block(&mut self, scope: &mut Scope, block: &Block) -> InterpreterResult {
         let Block { body } = block;
 
-        let mut result = Nil.to_value1();
+        let mut result = Nil.to_object();
 
         for segment in body {
             let Some(expr) = segment.downcast::<value2::Vec>() else {
                 unreachable!("segment should always parse as a vec")
             };
 
-            let exprs = parse_exprs(
-                self,
-                scope,
-                &mut TokenStream::new(
-                    expr.iter()
-                        .map(|v| v.clone().to_value1())
-                        .collect::<HamtVec<Value>>()
-                        .as_slice(),
-                ),
-            )
-            .map_err(InterpreterError::ParseError)?;
+            let exprs = parse_exprs(self, scope, &mut TokenStream::new(expr.as_slice()))
+                .map_err(InterpreterError::ParseError)?;
 
             for expr in &exprs {
                 result = self.eval_expr(scope, expr)?;
@@ -985,9 +946,9 @@ impl Interpreter {
 fn quote_substitute(
     interpreter: &mut Interpreter,
     scope: &Scope,
-    tokens: HamtVecSlice<Value>,
-) -> InterpreterResult<HamtVec<Value>> {
-    let mut result = HamtVec::new();
+    tokens: Slice,
+) -> InterpreterResult<value2::Vec> {
+    let mut result = value2::Vec::default();
 
     let mut stream = TokenStream::new(tokens);
 
@@ -997,7 +958,7 @@ fn quote_substitute(
                 // interpolate value from scope
 
                 match stream.next() {
-                    Some(Value::Object(name)) if name.is::<Symbol>() => {
+                    Some(name) if name.is::<Symbol>() => {
                         let name = name.downcast::<Symbol>().unwrap();
                         let value = scope
                             .resolve(name)
@@ -1008,17 +969,12 @@ fn quote_substitute(
                     }
                     Some(t) if t.downcast::<Tuple>().map(|t| t.len() == 1) == Some(true) => {
                         let t = t.downcast::<Tuple>().unwrap();
-                        let Some(v) = t.data().get(0).and_then(|v| v.downcast::<value2::Vec>())
-                        else {
+                        let t = t.data().as_slice();
+                        let Some(v) = t.get(0).and_then(|v| v.downcast::<value2::Vec>()) else {
                             panic!("expected tuple to contain a vec")
                         };
 
-                        let mut stream = TokenStream::new(
-                            v.iter()
-                                .map(|v| v.clone().to_value1())
-                                .collect::<HamtVec<Value>>()
-                                .as_slice(),
-                        );
+                        let mut stream = TokenStream::new(v.as_slice());
 
                         let peek = stream.peek();
 
@@ -1045,7 +1001,7 @@ fn quote_substitute(
                             };
 
                             for value in v {
-                                result = result.push(value.clone().to_value1());
+                                result = result.push(value.clone());
                             }
                         } else {
                             result = result.push(value);
@@ -1054,27 +1010,16 @@ fn quote_substitute(
                     _ => panic!("expected symbol or parenthesized expression after $ in quote"),
                 }
             }
-            Some(Value::Object(b)) if b.is::<Block>() => {
+            Some(b) if b.is::<Block>() => {
                 let b = b.downcast::<Block>().unwrap();
                 result = result.push(
                     Block {
-                        body: quote_substitute(
-                            interpreter,
-                            scope,
-                            b.body
-                                .iter()
-                                .map(|v| v.clone().to_value1())
-                                .collect::<HamtVec<_>>()
-                                .as_slice(),
-                        )?
-                        .iter()
-                        .map(|v| v.to_value2())
-                        .collect(),
+                        body: quote_substitute(interpreter, scope, b.body.as_slice())?,
                     }
-                    .to_value1(),
+                    .to_object(),
                 );
             }
-            Some(Value::Object(m)) if m.is::<Map>() => {
+            Some(m) if m.is::<Map>() => {
                 let m = m.downcast::<Map>().unwrap();
                 let mut hm = Map::new();
 
@@ -1082,71 +1027,34 @@ fn quote_substitute(
                     let k = quote_substitute(
                         interpreter,
                         scope,
-                        HamtVec::new().push(k.clone().to_value1()).as_slice(),
+                        value2::Vec::default().push(k.clone()).as_slice(),
                     )?;
+                    let k = k.as_slice();
                     let k = k.get(0).unwrap();
-
-                    let v = v.clone().to_value1();
 
                     let Some(v) = v.downcast::<value2::Vec>() else {
                         panic!("Expected value-side of mapline to be a vec.");
                     };
 
                     hm = hm.insert(
-                        k.clone().to_value2(),
-                        quote_substitute(
-                            interpreter,
-                            scope,
-                            v.iter()
-                                .map(|v| v.clone().to_value1())
-                                .collect::<HamtVec<_>>()
-                                .as_slice(),
-                        )?
-                        .iter()
-                        .map(|v| v.to_value2())
-                        .collect::<value2::Vec>()
-                        .to_object(),
+                        k.clone(),
+                        quote_substitute(interpreter, scope, v.as_slice())?.to_object(),
                     );
                 }
 
-                result = result.push(hm.to_value1());
+                result = result.push(hm.to_object());
             }
-            Some(Value::Object(s)) if s.is::<Set>() => todo!(),
-            Some(Value::Object(v)) if v.is::<value2::Vec>() => {
+            Some(s) if s.is::<Set>() => todo!(),
+            Some(v) if v.is::<value2::Vec>() => {
                 let v = v.downcast::<value2::Vec>().unwrap();
-                result = result.push(
-                    quote_substitute(
-                        interpreter,
-                        scope,
-                        v.iter()
-                            .map(|v| v.clone().to_value1())
-                            .collect::<HamtVec<Value>>()
-                            .as_slice(),
-                    )?
-                    .iter()
-                    .map(|v| v.to_value2())
-                    .collect::<value2::Vec>()
-                    .to_value1(),
-                )
+                result =
+                    result.push(quote_substitute(interpreter, scope, v.as_slice())?.to_object())
             }
-            Some(Value::Object(t)) if t.is::<Tuple>() => {
+            Some(t) if t.is::<Tuple>() => {
                 let t = t.downcast::<Tuple>().unwrap();
                 result = result.push(
-                    Tuple::new(
-                        quote_substitute(
-                            interpreter,
-                            scope,
-                            t.data()
-                                .iter()
-                                .map(|v| v.clone().to_value1())
-                                .collect::<HamtVec<_>>()
-                                .as_slice(),
-                        )?
-                        .iter()
-                        .map(|v| v.to_value2())
-                        .collect::<HamtVec<_>>(),
-                    )
-                    .to_value1(),
+                    Tuple::new(quote_substitute(interpreter, scope, t.data().as_slice())?)
+                        .to_object(),
                 );
             }
             Some(v) => {

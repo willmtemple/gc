@@ -23,7 +23,7 @@ impl Value for Sigil {
 
     fn to_string(&self, interpreter: &mut Interpreter) -> crate::InterpreterResult {
         crate::InterpreterResult::Value(
-            super::String::from(interpreter.get_sigil_text(self)).to_value1(),
+            super::String::from(interpreter.get_sigil_text(self)).to_object(),
         )
     }
 }

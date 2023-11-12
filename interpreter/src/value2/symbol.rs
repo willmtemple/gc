@@ -34,6 +34,6 @@ impl Value for Symbol {
     }
 
     fn to_string(&self, _: &mut crate::Interpreter) -> crate::InterpreterResult {
-        crate::InterpreterResult::Value(super::String::from(format!(":{}", self.name)).to_value1())
+        crate::InterpreterResult::Value(super::String::from(format!(":{}", self.name)).to_object())
     }
 }

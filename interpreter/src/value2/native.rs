@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use hamt::vec::HamtVecSlice;
-
 use crate::{Interpreter, InterpreterError, InterpreterResult};
 
-use super::{Nil, Object, Value};
+use super::{Nil, Object, Slice, Value};
 
-pub type CallImpl = fn(&mut Interpreter, HamtVecSlice<Arc<Object>>) -> InterpreterResult;
+pub type CallImpl = fn(&mut Interpreter, Slice) -> InterpreterResult;
 pub type ToStringImpl = fn(&mut Interpreter, &NativeObject) -> InterpreterResult;
 pub type GetImpl = fn(&mut Interpreter, &NativeObject, Arc<Object>) -> InterpreterResult;
 
@@ -53,17 +51,11 @@ impl Value for NativeObject {
         std::ptr::eq(self, other)
     }
 
-    fn call(
-        &self,
-        _interpreter: &mut Interpreter,
-        _args: HamtVecSlice<Arc<Object>>,
-    ) -> InterpreterResult {
+    fn call(&self, _interpreter: &mut Interpreter, args: Slice) -> InterpreterResult {
         if let Some(call) = self.call {
-            call(_interpreter, _args)
+            call(_interpreter, args)
         } else {
-            InterpreterResult::Error(InterpreterError::UncallableValue(crate::Value::Object(
-                Nil.to_object(),
-            )))
+            InterpreterResult::Error(InterpreterError::UncallableValue(Nil.to_object()))
         }
     }
 
@@ -71,7 +63,7 @@ impl Value for NativeObject {
         if let Some(to_string) = self.to_string {
             to_string(interpreter, self)
         } else {
-            InterpreterResult::Value(super::String::from("<native object>").to_value1())
+            InterpreterResult::Value(super::String::from("<native object>").to_object())
             // InterpreterResult::Error(InterpreterError::ProtocolNotImplemented(
             //     "As<string>",
             //     Self::NAME,

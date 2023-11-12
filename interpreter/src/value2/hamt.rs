@@ -6,8 +6,6 @@ use crate::{InterpreterError, InterpreterResult};
 
 use super::{Nil, Object, Value};
 
-use crate::Value as Value1;
-
 pub type Map = HamtMap<Arc<Object>, Arc<Object>, CloningConfig>;
 
 impl Value for Map {
@@ -34,11 +32,7 @@ impl Value for Map {
         next.is_none()
     }
 
-    fn call(
-        &self,
-        _: &mut crate::Interpreter,
-        args: HamtVecSlice<std::sync::Arc<Object>>,
-    ) -> crate::InterpreterResult {
+    fn call(&self, _: &mut crate::Interpreter, args: Slice) -> crate::InterpreterResult {
         // Maps act as functions of keys
         if args.len() != 1 {
             return InterpreterResult::Error(InterpreterError::InvalidArity(1, args.len()));
@@ -46,9 +40,7 @@ impl Value for Map {
 
         let key = args.get(0).unwrap();
 
-        InterpreterResult::Value(Value1::Object(
-            self.get(key).cloned().unwrap_or(Nil.to_object()),
-        ))
+        InterpreterResult::Value(self.get(key).cloned().unwrap_or(Nil.to_object()))
     }
 
     fn to_string(&self, interpreter: &mut crate::Interpreter) -> crate::InterpreterResult {
@@ -57,48 +49,36 @@ impl Value for Map {
         for (k, v) in self.iter() {
             let ks = k.to_string(interpreter)?;
 
-            let Value1::Object(ko) = ks else {
-                panic!("Expected to_string to return a string.");
-            };
-
-            if !ko.is::<super::String>() {
+            if !ks.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
                     expected: super::String::NAME,
-                    actual: ko.type_name(),
+                    actual: ks.type_name(),
                 });
             }
 
             let vs = v.to_string(interpreter)?;
 
-            let Value1::Object(vo) = vs else {
-                panic!("Expected to_string to return a string.");
-            };
-
-            if !vo.is::<super::String>() {
+            if !vs.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
                     expected: super::String::NAME,
-                    actual: vo.type_name(),
+                    actual: vs.type_name(),
                 });
             }
 
             parts.push(format!(
                 "{}: {}",
-                ko.downcast::<super::String>().unwrap().value,
-                vo.downcast::<super::String>().unwrap().value
+                ks.downcast::<super::String>().unwrap().value,
+                vs.downcast::<super::String>().unwrap().value
             ));
         }
 
         InterpreterResult::Value(
-            crate::value2::String::from(format!("#{{{}}}", parts.join(", "))).to_value1(),
+            crate::value2::String::from(format!("#{{{}}}", parts.join(", "))).to_object(),
         )
     }
 
     fn get(&self, _interpreter: &mut crate::Interpreter, key: Arc<Object>) -> InterpreterResult {
-        InterpreterResult::Value(
-            Map::get(self, &key)
-                .map(|v| v.clone().to_value1())
-                .unwrap_or(Nil.to_value1()),
-        )
+        InterpreterResult::Value(Map::get(self, &key).cloned().unwrap_or(Nil.to_object()))
     }
 }
 
@@ -124,11 +104,7 @@ impl Value for Set {
         next.is_none()
     }
 
-    fn call(
-        &self,
-        _: &mut crate::Interpreter,
-        args: HamtVecSlice<std::sync::Arc<Object>>,
-    ) -> crate::InterpreterResult {
+    fn call(&self, _: &mut crate::Interpreter, args: Slice) -> crate::InterpreterResult {
         // Sets act as functions of keys
         if args.len() != 1 {
             return InterpreterResult::Error(InterpreterError::InvalidArity(1, args.len()));
@@ -136,11 +112,11 @@ impl Value for Set {
 
         let key = args.get(0).unwrap();
 
-        InterpreterResult::Value(Value1::Object(if self.contains(key) {
+        InterpreterResult::Value(if self.contains(key) {
             key.clone()
         } else {
             Nil.to_object()
-        }))
+        })
     }
 
     fn to_string(&self, interpreter: &mut crate::Interpreter) -> crate::InterpreterResult {
@@ -149,30 +125,27 @@ impl Value for Set {
         for k in self.iter() {
             let ks = k.to_string(interpreter)?;
 
-            let Value1::Object(ko) = ks else {
-                panic!("Expected to_string to return a string.");
-            };
-
-            if !ko.is::<super::String>() {
+            if !ks.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
                     expected: super::String::NAME,
-                    actual: ko.type_name(),
+                    actual: ks.type_name(),
                 });
             }
 
-            parts.push(ko.downcast::<super::String>().unwrap().value.clone());
+            parts.push(ks.downcast::<super::String>().unwrap().value.clone());
         }
 
         InterpreterResult::Value(
-            crate::value2::String::from(format!("#({})", parts.join(", "))).to_value1(),
+            crate::value2::String::from(format!("#({})", parts.join(", "))).to_object(),
         )
     }
 
     fn get(&self, _: &mut crate::Interpreter, _key: Arc<Object>) -> InterpreterResult {
-        InterpreterResult::Value(self.contains(&_key).to_value1())
+        InterpreterResult::Value(self.contains(&_key).to_object())
     }
 }
 
+pub type Slice = HamtVecSlice<Arc<Object>, CloningConfig>;
 pub type Vec = HamtVec<Arc<Object>, CloningConfig>;
 
 impl Value for Vec {
@@ -198,30 +171,22 @@ impl Value for Vec {
         for v in self.iter() {
             let vs = v.to_string(interpreter)?;
 
-            let Value1::Object(vo) = vs else {
-                panic!("Expected to_string to return a string.");
-            };
-
-            if !vo.is::<super::String>() {
+            if !vs.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
                     expected: super::String::NAME,
-                    actual: vo.type_name(),
+                    actual: vs.type_name(),
                 });
             }
 
-            parts.push(vo.downcast::<super::String>().unwrap().value.clone());
+            parts.push(vs.downcast::<super::String>().unwrap().value.clone());
         }
 
         InterpreterResult::Value(
-            crate::value2::String::from(format!("[{}]", parts.join(", "))).to_value1(),
+            crate::value2::String::from(format!("[{}]", parts.join(", "))).to_object(),
         )
     }
 
-    fn call(
-        &self,
-        interpreter: &mut crate::Interpreter,
-        args: HamtVecSlice<Arc<Object>>,
-    ) -> InterpreterResult {
+    fn call(&self, interpreter: &mut crate::Interpreter, args: Slice) -> InterpreterResult {
         // Vectors act as functions of indices
         if args.len() != 1 {
             return InterpreterResult::Error(InterpreterError::InvalidArity(1, args.len()));
@@ -236,7 +201,7 @@ impl Value for Vec {
         let index = match index.downcast::<i64>() {
             Some(n @ 0..) => *n as usize,
             Some(n) => {
-                return InterpreterResult::Error(InterpreterError::InvalidIndex(n.to_value1()));
+                return InterpreterResult::Error(InterpreterError::InvalidIndex(n.to_object()));
             }
             None => {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
@@ -248,10 +213,10 @@ impl Value for Vec {
 
         if index >= self.len() {
             return InterpreterResult::Error(InterpreterError::InvalidIndex(
-                (index as i64).to_value1(),
+                (index as i64).to_object(),
             ));
         }
 
-        InterpreterResult::Value(self[index].clone().to_value1())
+        InterpreterResult::Value(self[index].clone())
     }
 }

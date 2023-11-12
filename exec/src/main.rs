@@ -1,6 +1,9 @@
-use std::{env::args, fs::read_to_string, ops::Deref, path::PathBuf, sync::Arc};
+use std::{env::args, fs::read_to_string, path::PathBuf, sync::Arc};
 
-use interpreter::InterpreterHost;
+use interpreter::{
+    value2::{self, Nil},
+    InterpreterHost,
+};
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -57,7 +60,15 @@ fn main() {
         std::process::exit(1);
     });
 
-    if r.type_name().deref() != "nil" {
-        println!("{}", r.print(&mut interpreter, 1));
+    if r.is::<Nil>() {
+        println!(
+            "{}",
+            r.to_string(&mut interpreter)
+                .expect_result()
+                .unwrap()
+                .downcast::<value2::String>()
+                .unwrap()
+                .value
+        );
     }
 }

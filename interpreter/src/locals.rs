@@ -1,10 +1,11 @@
 use std::cell::RefCell;
+use std::sync::Arc;
 
-use hamt::{vec::HamtVecSlice, HamtMap};
+use hamt::HamtMap;
 
-use crate::{value::Value, value2::Nil, Interpreter};
+use crate::{value2::Nil, Interpreter};
 
-use crate::value2::Value as Value2;
+use crate::value2::{Object, Slice, Value};
 
 thread_local! {
     pub static LOCALS: RefCell<Locals> = RefCell::new(Locals::new());
@@ -12,7 +13,7 @@ thread_local! {
 
 pub struct Locals {
     cursor: usize,
-    data: HamtMap<usize, Value>,
+    data: HamtMap<usize, Arc<Object>>,
 }
 
 impl Locals {
@@ -23,16 +24,16 @@ impl Locals {
         }
     }
 
-    fn get(&self, index: usize) -> Option<&Value> {
+    fn get(&self, index: usize) -> Option<&Arc<Object>> {
         self.data.get(&index)
     }
 
-    fn set(&mut self, index: usize, value: Value) {
+    fn set(&mut self, index: usize, value: Arc<Object>) {
         self.data = self.data.insert(index, value);
     }
 }
 
-pub fn def_local(_: &mut Interpreter, args: HamtVecSlice<Value>) -> Value {
+pub fn def_local(_: &mut Interpreter, args: Slice) -> Arc<Object> {
     let value = args
         .get(0)
         .expect("expected exactly one argument in call to def_local");
@@ -46,11 +47,11 @@ pub fn def_local(_: &mut Interpreter, args: HamtVecSlice<Value>) -> Value {
 
         locals.data = locals.data.insert(index, value.clone());
 
-        (index as i64).to_value1()
+        (index as i64).to_object()
     })
 }
 
-pub fn get_local(_: &mut Interpreter, args: HamtVecSlice<Value>) -> Value {
+pub fn get_local(_: &mut Interpreter, args: Slice) -> Arc<Object> {
     let index = args
         .get(0)
         .expect("expected exactly one argument in call to get_local")
@@ -71,7 +72,7 @@ pub fn get_local(_: &mut Interpreter, args: HamtVecSlice<Value>) -> Value {
     })
 }
 
-pub fn set_local(_: &mut Interpreter, args: HamtVecSlice<Value>) -> Value {
+pub fn set_local(_: &mut Interpreter, args: Slice) -> Arc<Object> {
     let index = args
         .get(0)
         .expect("expected exactly one argument in call to set_local")
@@ -91,6 +92,6 @@ pub fn set_local(_: &mut Interpreter, args: HamtVecSlice<Value>) -> Value {
 
         locals.set(index, value.clone());
 
-        Nil.to_value1()
+        Nil.to_object()
     })
 }

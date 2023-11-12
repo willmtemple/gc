@@ -26,7 +26,7 @@ impl Value for String {
             Self {
                 value: self.value.clone(),
             }
-            .to_value1(),
+            .to_object(),
         )
     }
 }
