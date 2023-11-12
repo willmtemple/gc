@@ -1,4 +1,7 @@
-use core::hash::{BuildHasher, Hash};
+use core::{
+    fmt::{self, Formatter},
+    hash::{BuildHasher, Hash},
+};
 
 use crate::{
     config::{DefaultConfig, HamtConfig, Kvp},
@@ -13,6 +16,29 @@ pub struct HamtSet<K: Eq + Hash, Config: HamtConfig<K, ()> = DefaultConfig> {
     // size: usize,
     config: Config,
     root: Option<Config::NodeStore>,
+}
+
+impl<K: Eq + Hash, Config: HamtConfig<K, ()>> Clone for HamtSet<K, Config> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            root: self.root.clone(),
+        }
+    }
+}
+
+use core::fmt::Debug;
+
+impl<K: Eq + Hash, Config: HamtConfig<K, ()>> Debug for HamtSet<K, Config> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "HamtSet {{ ")?;
+        if let Some(root) = self.root.as_ref() {
+            write!(f, "@{:p}", root)?;
+        } else {
+            write!(f, "<empty>")?;
+        }
+        write!(f, " }}")
+    }
 }
 
 impl<K: Eq + Hash> HamtSet<K> {
@@ -117,4 +143,30 @@ impl<K: Eq + Hash, Config: HamtConfig<K, ()>> HamtSet<K, Config> {
 
     // TODO/wtemple
     // pub fn is_superset(&self, other: &Self) -> bool;
+}
+
+impl<K: Eq + Hash, Config: HamtConfig<K, ()>> Eq for HamtSet<K, Config> {}
+
+impl<K: Eq + Hash, Config: HamtConfig<K, ()>> PartialEq for HamtSet<K, Config> {
+    fn eq(&self, _other: &Self) -> bool {
+        todo!()
+    }
+}
+
+impl<K: Eq + Hash, Config: HamtConfig<K, ()>> Hash for HamtSet<K, Config> {
+    fn hash<H: core::hash::Hasher>(&self, _state: &mut H) {
+        todo!()
+    }
+}
+
+impl<K: Eq + Hash, Config: HamtConfig<K, ()> + Default> FromIterator<K> for HamtSet<K, Config> {
+    fn from_iter<T: IntoIterator<Item = K>>(iter: T) -> Self {
+        let mut map = Self::new_with_config(Config::default());
+
+        for k in iter {
+            map = map.insert(k)
+        }
+
+        map
+    }
 }

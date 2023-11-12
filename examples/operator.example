@@ -1,0 +1,27 @@
+print("Hello world!");
+
+let example = load_module("./rel.l");
+
+let x = load_module("foo");
+
+print(x.foo);
+
+example();
+
+#[keyword]
+fn export(...rest) {
+    let s = gensym("_export");
+    quote! {
+        let $s = {
+            $(...rest)
+        };
+
+        __sys.add_export($s);
+
+        $s
+    }
+}
+
+export fn foo() {
+    print("Hello from foo!");
+}

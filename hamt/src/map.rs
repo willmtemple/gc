@@ -1,5 +1,6 @@
 use core::{
     borrow::Borrow,
+    fmt::{self, Debug, Formatter},
     hash::{BuildHasher, Hash},
     ops::Index,
 };
@@ -15,15 +16,27 @@ pub struct HamtMap<K: Eq + Hash, V, Config: HamtConfig<K, V> = DefaultConfig> {
     root: Option<Config::NodeStore>,
 }
 
-impl<K: Eq + Hash, V> HamtMap<K, V> {
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V> + Default> HamtMap<K, V, Config> {
     pub fn new() -> Self {
-        Self::new_with_config(DefaultConfig::default())
+        Self::new_with_config(Default::default())
     }
 }
 
 impl<K: Eq + Hash, V> Default for HamtMap<K, V> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> Debug for HamtMap<K, V, Config> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "HamtMap {{ ")?;
+        if let Some(root) = self.root.as_ref() {
+            write!(f, "@{:p}", root)?;
+        } else {
+            write!(f, "<empty>")?;
+        }
+        write!(f, " }}")
     }
 }
 
@@ -49,7 +62,7 @@ where
 }
 
 impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtMap<K, V, Config> {
-    pub fn new_with_config(config: Config) -> Self {
+    pub const fn new_with_config(config: Config) -> Self {
         Self { config, root: None }
     }
 
@@ -110,5 +123,33 @@ impl<K: Eq + Hash, V, Config: HamtConfig<K, V>> HamtMap<K, V, Config> {
     /// collisions).
     pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
         HamtIterator::<K, V, Config>::new(self.root.clone())
+    }
+}
+
+impl<K: Eq + Hash, V: Eq, Config: HamtConfig<K, V>> Eq for HamtMap<K, V, Config> {}
+
+impl<K: Eq + Hash, V: Eq, Config: HamtConfig<K, V>> PartialEq for HamtMap<K, V, Config> {
+    fn eq(&self, _other: &Self) -> bool {
+        todo!()
+    }
+}
+
+impl<K: Eq + Hash, V: Hash, Config: HamtConfig<K, V>> Hash for HamtMap<K, V, Config> {
+    fn hash<H: core::hash::Hasher>(&self, _state: &mut H) {
+        todo!()
+    }
+}
+
+impl<K: Eq + Hash, V: Hash, Config: HamtConfig<K, V> + Default> FromIterator<(K, V)>
+    for HamtMap<K, V, Config>
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let mut map = Self::new_with_config(Config::default());
+
+        for (k, v) in iter {
+            map = map.insert(k, v);
+        }
+
+        map
     }
 }

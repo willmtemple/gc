@@ -25,6 +25,8 @@ pub mod mark;
 pub mod obj;
 pub mod ptr;
 
+pub use ptr::{Gc, Root, Weak};
+
 #[cfg(not(feature = "std"))]
 mod _gc {
     use core::ops::DerefMut;

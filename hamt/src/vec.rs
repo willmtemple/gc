@@ -1,4 +1,5 @@
 use core::{
+    fmt::{self, Debug, Formatter},
     iter::{Map, Take},
     ops::{Deref, Index, RangeBounds},
 };
@@ -14,9 +15,9 @@ pub struct HamtVec<V, Config: HamtConfig<(), V> = DefaultConfig> {
     slice: HamtVecSlice<V, Config>,
 }
 
-impl<V> Default for HamtVec<V, DefaultConfig> {
+impl<V, Config: HamtConfig<(), V> + Default> Default for HamtVec<V, Config> {
     fn default() -> Self {
-        Self::new_with_config(DefaultConfig::default())
+        Self::new_with_config(Default::default())
     }
 }
 
@@ -155,7 +156,20 @@ impl<'a, V, Config: HamtConfig<(), V>> IntoIterator for &'a HamtVec<V, Config> {
     }
 }
 
-pub struct HamtVecSlice<V, Config: HamtConfig<(), V>> {
+impl<V, Config: HamtConfig<(), V>> Debug for HamtVec<V, Config> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "HamtVec {{ ")?;
+        write!(f, "{}, ", self.len())?;
+        if let Some(root) = self.root.as_ref() {
+            write!(f, "@{:p}", root)?;
+        } else {
+            write!(f, "Empty")?;
+        }
+        write!(f, " }}")
+    }
+}
+
+pub struct HamtVecSlice<V, Config: HamtConfig<(), V> = DefaultConfig> {
     offset: usize,
     len: usize,
     root: Option<Config::NodeStore>,
@@ -168,6 +182,22 @@ impl<V, Config: HamtConfig<(), V>> Clone for HamtVecSlice<V, Config> {
             len: self.len,
             root: self.root.clone(),
         }
+    }
+}
+
+impl<V, Config: HamtConfig<(), V>> Debug for HamtVecSlice<V, Config> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "HamtVecSlice {{ ")?;
+
+        if let Some(root) = self.root.as_ref() {
+            write!(f, "@{:p}", root)?;
+        } else {
+            write!(f, "Empty")?;
+        }
+
+        write!(f, " }}")?;
+
+        write!(f, "[{}..{}]", self.offset, self.offset + self.len)
     }
 }
 
@@ -259,5 +289,49 @@ impl<V, Config: HamtConfig<(), V>> Index<usize> for HamtVecSlice<V, Config> {
             self.get(index)
                 .expect("unexpected error: HamtVecSlice index not found")
         }
+    }
+}
+
+impl<V: Eq, Config: HamtConfig<(), V>> Eq for HamtVec<V, Config> {}
+
+impl<V: Eq, Config: HamtConfig<(), V>> PartialEq for HamtVec<V, Config> {
+    fn eq(&self, _other: &Self) -> bool {
+        todo!()
+    }
+}
+
+use core::hash::Hash;
+
+impl<V: Hash, Config: HamtConfig<(), V>> Hash for HamtVec<V, Config> {
+    fn hash<H: core::hash::Hasher>(&self, _state: &mut H) {
+        for v in self.iter() {
+            v.hash(_state);
+        }
+    }
+}
+
+impl<V: Eq, Config: HamtConfig<(), V>> Eq for HamtVecSlice<V, Config> {}
+
+impl<V: Eq, Config: HamtConfig<(), V>> PartialEq for HamtVecSlice<V, Config> {
+    fn eq(&self, _other: &Self) -> bool {
+        todo!()
+    }
+}
+
+impl<V: Hash, Config: HamtConfig<(), V>> Hash for HamtVecSlice<V, Config> {
+    fn hash<H: core::hash::Hasher>(&self, _state: &mut H) {
+        todo!()
+    }
+}
+
+impl<V: Hash, Config: HamtConfig<(), V> + Default> FromIterator<V> for HamtVec<V, Config> {
+    fn from_iter<T: IntoIterator<Item = V>>(iter: T) -> Self {
+        let mut vec = Self::new_with_config(Config::default());
+
+        for v in iter {
+            vec = vec.push(v);
+        }
+
+        vec
     }
 }

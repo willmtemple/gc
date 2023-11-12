@@ -1,0 +1,11 @@
+let v = [nil, 0, 1, 2, 3, 4, 5];
+
+fn foo(n) {
+    if v[n] {
+        foo(v[n])
+    } else {
+        "done"
+    }
+}
+
+foo(4)

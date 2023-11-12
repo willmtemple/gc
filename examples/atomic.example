@@ -1,0 +1,23 @@
+import sys::stm;
+
+import { Token } from sys::parser;
+
+#[keyword]
+fn atomic(tokens: Seq<Token>) {
+  assert len(tokens) == 1 && type(tokens[0]) == :block;
+
+  quote!(
+    #stm.run_transaction(fn () #tokens)
+  )
+}
+
+cell x = 0;
+cell x_sqr = 0;
+
+fn increment() {
+  atomic {
+    let x_current = x.get();
+    x.set(x_current + 1);
+    x_sqr.set(x_current * x_current);
+  }
+}
