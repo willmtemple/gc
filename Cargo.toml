@@ -5,6 +5,6 @@ members = ["exec", "interpreter", "gc", "gc/derive_mark", "hamt", "min_test"]
 [profile.release]
 lto = true
 opt-level = "s"
-# strip = true
+strip = true
 panic = "abort"
 codegen-units = 1

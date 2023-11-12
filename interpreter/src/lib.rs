@@ -601,6 +601,101 @@ impl Interpreter {
                     .to_object(),
             );
 
+            // fn neg(n: number): number
+            sys = sys.insert(
+                Symbol::new("neg").to_object(),
+                NativeObject::new()
+                    .with_call(|_, args| {
+                        if args.len() != 1 {
+                            panic!("neg expects exactly one argument.");
+                        }
+
+                        let n = args.get(0).unwrap();
+
+                        let Some(n) = n.downcast::<i64>() else {
+                            panic!("Argument to neg must be a number.")
+                        };
+
+                        InterpreterResult::Value((-*n).to_object())
+                    })
+                    .to_object(),
+            );
+
+            // fn mul(l: number, r: number): number
+            sys = sys.insert(
+                Symbol::new("mul").to_object(),
+                NativeObject::new()
+                    .with_call(|_, args| {
+                        if args.len() != 2 {
+                            panic!("mul expects exactly two arguments.");
+                        }
+
+                        let l = args.get(0).unwrap();
+                        let r = args.get(1).unwrap();
+
+                        let Some(l) = l.downcast::<i64>() else {
+                            panic!("First argument to mul must be a number.")
+                        };
+
+                        let Some(r) = r.downcast::<i64>() else {
+                            panic!("Second argument to mul must be a number.")
+                        };
+
+                        InterpreterResult::Value((*l * *r).to_object())
+                    })
+                    .to_object(),
+            );
+
+            // fn div(l: number, r: number): number
+            sys = sys.insert(
+                Symbol::new("div").to_object(),
+                NativeObject::new()
+                    .with_call(|_, args| {
+                        if args.len() != 2 {
+                            panic!("div expects exactly two arguments.");
+                        }
+
+                        let l = args.get(0).unwrap();
+                        let r = args.get(1).unwrap();
+
+                        let Some(l) = l.downcast::<i64>() else {
+                            panic!("First argument to div must be a number.")
+                        };
+
+                        let Some(r) = r.downcast::<i64>() else {
+                            panic!("Second argument to div must be a number.")
+                        };
+
+                        InterpreterResult::Value((*l / *r).to_object())
+                    })
+                    .to_object(),
+            );
+
+            // fn mod(l: number, r: number): number
+            sys = sys.insert(
+                Symbol::new("mod").to_object(),
+                NativeObject::new()
+                    .with_call(|_, args| {
+                        if args.len() != 2 {
+                            panic!("mod expects exactly two arguments.");
+                        }
+
+                        let l = args.get(0).unwrap();
+                        let r = args.get(1).unwrap();
+
+                        let Some(l) = l.downcast::<i64>() else {
+                            panic!("First argument to mod must be a number.")
+                        };
+
+                        let Some(r) = r.downcast::<i64>() else {
+                            panic!("Second argument to mod must be a number.")
+                        };
+
+                        InterpreterResult::Value((*l % *r).to_object())
+                    })
+                    .to_object(),
+            );
+
             sys = sys.insert(
                 Symbol::new("def_local").to_object(),
                 NativeObject::new()

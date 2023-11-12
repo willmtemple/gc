@@ -4,7 +4,9 @@ loop {
     let next = x.get() + 1;
     x.set(next);
 
-    print("x =", next);
+    if (next % 1000) == 0 {
+        print("x =", next);
+    }
 }
 
 print("All done.");
