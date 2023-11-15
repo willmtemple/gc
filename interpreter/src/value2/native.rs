@@ -79,3 +79,100 @@ impl Value for NativeObject {
         }
     }
 }
+
+impl Value for fn(&mut Interpreter, Slice) -> InterpreterResult {
+    const NAME: &'static str = "function";
+
+    fn egal(&self, other: &Self) -> bool {
+        core::ptr::eq(self, other)
+    }
+
+    fn call(&self, interpreter: &mut Interpreter, args: Slice) -> InterpreterResult {
+        self(interpreter, args)
+    }
+
+    fn to_string(&self, _: &mut Interpreter) -> InterpreterResult {
+        InterpreterResult::Value(super::String::from("<native function>").to_object())
+    }
+}
+
+macro_rules! impl_value_for_fn {
+    ($($t:ident)*) => {
+        impl<$($t : Value + Clone,)* R: Value> Value for fn($($t),*) -> R {
+            const NAME: &'static str = "function";
+
+            fn egal(&self, other: &Self) -> bool {
+                core::ptr::eq(self, other)
+            }
+
+            fn call(&self, _: &mut Interpreter, args: Slice) -> InterpreterResult {
+                let mut idx = 0;
+                InterpreterResult::Value(
+                    self(
+                        $(
+                            #[allow(unused_assignments)]
+                            {
+                                let r = args
+                                    .get(idx)
+                                    .and_then(|v| v.downcast::<$t>().map(InterpreterResult::Value))
+                                    .unwrap_or(InterpreterResult::Error(
+                                        InterpreterError::ArgumentError {
+                                            expected: <$t as Value>::NAME,
+                                            position: idx,
+                                        },
+                                    ))?;
+                                idx += 1;
+                                r.clone()
+                            }
+                        ),*
+                    )
+                    .to_object(),
+                )
+            }
+        }
+    };
+}
+
+impl_value_for_fn!(T1);
+
+impl<T1: Value + Clone, T2: Value + Clone, R: Value> Value for fn(T1, T2) -> R {
+    const NAME: &'static str = "function";
+
+    fn egal(&self, other: &Self) -> bool {
+        core::ptr::eq(self, other)
+    }
+
+    fn call(&self, _: &mut Interpreter, args: Slice) -> InterpreterResult {
+        let mut idx = 0;
+        InterpreterResult::Value(
+            self(
+                #[allow(unused_assignments)]
+                {
+                    let r = args
+                        .get(idx)
+                        .and_then(|v| v.downcast::<T1>().map(InterpreterResult::Value))
+                        .unwrap_or(InterpreterResult::Error(InterpreterError::ArgumentError {
+                            expected: T1::NAME,
+                            position: idx,
+                        }))?;
+                    idx += 1;
+                    r.clone()
+                },
+                #[allow(unused_assignments)]
+                {
+                    let r = args
+                        .get(idx)
+                        .and_then(|v| v.downcast::<T2>().map(InterpreterResult::Value))
+                        .unwrap_or(InterpreterResult::Error(InterpreterError::ArgumentError {
+                            expected: T1::NAME,
+                            position: idx,
+                        }))?;
+                    idx += 1;
+
+                    r.clone()
+                },
+            )
+            .to_object(),
+        )
+    }
+}

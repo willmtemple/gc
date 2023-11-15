@@ -60,7 +60,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    if r.is::<Nil>() {
+    if !r.is::<Nil>() {
         println!(
             "{}",
             r.to_string(&mut interpreter)

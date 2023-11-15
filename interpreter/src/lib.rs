@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
     process::exit,
     sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 enum ExitCode {
@@ -18,20 +19,20 @@ enum ExitCode {
 use ast::{
     parse_exprs, seglisp_body_to_block, Expr, Operator, OperatorPosition, ParseError, TokenStream,
 };
-use hamt::{config::CloningConfig, HamtMap, HamtVec};
+use hamt::{HamtMap, HamtVec};
 use list::List;
 use scope::Scope;
 use seglisp::{
     diagnostics::format_and_write_diagnostics_with_termcolor, read_str, ReaderConfiguration,
 };
 use value2::{
-    Block, Function, Map, NativeObject, Nil, Object, Set, Sigil, Slice, Symbol, Tuple,
-    Value as Value2,
+    Block, Function, Map, NativeObject, Nil, Object, Set, Sigil, Slice, Symbol, Tuple, Value,
 };
 
 use crate::ast::{parse_expr, ValueOrExpr};
 
 mod ast;
+mod builtins;
 mod list;
 mod locals;
 mod scope;
@@ -118,6 +119,10 @@ pub enum InterpreterError {
     UnexpectedType {
         expected: &'static str,
         actual: &'static str,
+    },
+    ArgumentError {
+        expected: &'static str,
+        position: usize,
     },
 }
 
@@ -306,139 +311,7 @@ impl Interpreter {
 
             let module = seglisp_body_to_block(self, module);
 
-            let mut sys = value2::Map::new_with_config(CloningConfig::default());
-
-            sys = sys.insert(
-                Symbol::new("println").to_object(),
-                NativeObject::new()
-                    .with_call(|interpreter, arguments| {
-                        let mut init = false;
-                        for argument in &arguments {
-                            if init {
-                                interpreter.host.write_std(WriteTarget::Out, " ");
-                            } else {
-                                init = true;
-                            }
-
-                            let s = argument.to_string(interpreter)?;
-
-                            let s = s.to_string(interpreter)?;
-
-                            interpreter.host.write_std(
-                                WriteTarget::Out,
-                                &s.downcast::<value2::String>().unwrap().value,
-                            );
-                        }
-
-                        interpreter.host.write_std(WriteTarget::Out, "\n");
-
-                        InterpreterResult::Value(Nil.to_object())
-                    })
-                    .to_object(),
-            );
-
-            sys = sys.insert(
-                Symbol::new("bind_operator").to_object(),
-                NativeObject::new()
-                    .with_call(|interpreter, arguments| {
-                        let Some(f) = arguments.get(0) else {
-                            panic!("First argument to bind_operator should be an object.")
-                        };
-
-                        let Some(op) = arguments.get(1).and_then(|v| v.downcast::<Sigil>()) else {
-                            panic!("Second argument to bind_operator should be a sigil.")
-                        };
-
-                        let Some(precedence) = arguments.get(2).and_then(|v| v.downcast::<i64>())
-                        else {
-                            panic!("Third argument to bind_operator should be a number.")
-                        };
-
-                        let Some(position) = arguments
-                            .get(3)
-                            .and_then(|v| v.downcast::<value2::String>())
-                            .map(|v| v.value.deref())
-                        else {
-                            panic!("Fourth argument to bind_operator should be a string.")
-                        };
-
-                        let position = match position {
-                            ":prefix" => OperatorPosition::Prefix,
-                            ":infix" => OperatorPosition::Infix,
-                            ":postfix" => OperatorPosition::Postfix,
-                            _ => panic!("Invalid operator position: {}", position),
-                        };
-
-                        interpreter.operators = interpreter.operators.insert(
-                            (*op, position),
-                            Operator {
-                                position,
-                                precedence: *precedence,
-                                value: f.clone(),
-                            },
-                        );
-
-                        InterpreterResult::Value(Nil.to_object())
-                    })
-                    .to_object(),
-            );
-
-            sys = sys.insert(
-                Symbol::new("egal").to_object(),
-                NativeObject::new()
-                    .with_call(|_, arguments| {
-                        let a = arguments.get(0).cloned().unwrap_or(Nil.to_object());
-                        let b = arguments.get(1).cloned().unwrap_or(Nil.to_object());
-
-                        InterpreterResult::Value((a == b).to_object())
-                    })
-                    .to_object(),
-            );
-
-            sys = sys.insert(
-                Symbol::new("load_module").to_object(),
-                NativeObject::new()
-                    .with_call(|interpreter, arguments| {
-                        let Some(path) = arguments
-                            .get(3)
-                            .and_then(|v| v.downcast::<value2::String>())
-                            .map(|v| v.value.deref())
-                        else {
-                            panic!("First argument to load_module should be a string.")
-                        };
-
-                        // We have a few cases. This works like Node.js module resolution.
-                        // If the path doesn't start with `.` or `/`, we try to resolve it as a module using the host.
-                        // If the path is absolute, we just load it from the host.
-                        // If the path is definitely relative (i.e. starts with `.`), we load it relative to the current module's dirname.
-
-                        let is_path = path.starts_with('.') || path.starts_with('/');
-
-                        let final_path = if is_path {
-                            let path = Path::new(path);
-
-                            if path.is_absolute() {
-                                PathBuf::from(path)
-                            } else {
-                                let module = interpreter.get_current_module();
-
-                                module
-                                    .parent()
-                                    .expect("fatal error: module has no parent")
-                                    .join(path)
-                            }
-                        } else {
-                            let Some(module) = interpreter.host.resolve_module(path) else {
-                                panic!("failed to resolve module '{}'", path);
-                            };
-
-                            PathBuf::from(module.deref())
-                        };
-
-                        InterpreterResult::from(interpreter.read_and_eval_module(final_path))
-                    })
-                    .to_object(),
-            );
+            let mut sys = builtins::get_builtins();
 
             sys = sys.insert(
                 Symbol::new("gensym").to_object(),
@@ -551,151 +424,6 @@ impl Interpreter {
                     .to_object(),
             );
 
-            // fn add(l: number, r: number): number
-            sys = sys.insert(
-                Symbol::new("add").to_object(),
-                NativeObject::new()
-                    .with_call(|_, args| {
-                        if args.len() != 2 {
-                            panic!("add expects exactly two arguments.");
-                        }
-
-                        let l = args.get(0).unwrap();
-                        let r = args.get(1).unwrap();
-
-                        let Some(l) = l.downcast::<i64>() else {
-                            panic!("First argument to add must be a number.")
-                        };
-
-                        let Some(r) = r.downcast::<i64>() else {
-                            panic!("Second argument to add must be a number.")
-                        };
-
-                        InterpreterResult::Value((*l + *r).to_object())
-                    })
-                    .to_object(),
-            );
-
-            // fn sub(l: number, r: number): number
-            sys = sys.insert(
-                Symbol::new("sub").to_object(),
-                NativeObject::new()
-                    .with_call(|_, args| {
-                        if args.len() != 2 {
-                            panic!("sub expects exactly two arguments.");
-                        }
-
-                        let l = args.get(0).unwrap();
-                        let r = args.get(1).unwrap();
-
-                        let Some(l) = l.downcast::<i64>() else {
-                            panic!("First argument to sub must be a number.")
-                        };
-
-                        let Some(r) = r.downcast::<i64>() else {
-                            panic!("Second argument to sub must be a number.")
-                        };
-
-                        InterpreterResult::Value((*l - *r).to_object())
-                    })
-                    .to_object(),
-            );
-
-            // fn neg(n: number): number
-            sys = sys.insert(
-                Symbol::new("neg").to_object(),
-                NativeObject::new()
-                    .with_call(|_, args| {
-                        if args.len() != 1 {
-                            panic!("neg expects exactly one argument.");
-                        }
-
-                        let n = args.get(0).unwrap();
-
-                        let Some(n) = n.downcast::<i64>() else {
-                            panic!("Argument to neg must be a number.")
-                        };
-
-                        InterpreterResult::Value((-*n).to_object())
-                    })
-                    .to_object(),
-            );
-
-            // fn mul(l: number, r: number): number
-            sys = sys.insert(
-                Symbol::new("mul").to_object(),
-                NativeObject::new()
-                    .with_call(|_, args| {
-                        if args.len() != 2 {
-                            panic!("mul expects exactly two arguments.");
-                        }
-
-                        let l = args.get(0).unwrap();
-                        let r = args.get(1).unwrap();
-
-                        let Some(l) = l.downcast::<i64>() else {
-                            panic!("First argument to mul must be a number.")
-                        };
-
-                        let Some(r) = r.downcast::<i64>() else {
-                            panic!("Second argument to mul must be a number.")
-                        };
-
-                        InterpreterResult::Value((*l * *r).to_object())
-                    })
-                    .to_object(),
-            );
-
-            // fn div(l: number, r: number): number
-            sys = sys.insert(
-                Symbol::new("div").to_object(),
-                NativeObject::new()
-                    .with_call(|_, args| {
-                        if args.len() != 2 {
-                            panic!("div expects exactly two arguments.");
-                        }
-
-                        let l = args.get(0).unwrap();
-                        let r = args.get(1).unwrap();
-
-                        let Some(l) = l.downcast::<i64>() else {
-                            panic!("First argument to div must be a number.")
-                        };
-
-                        let Some(r) = r.downcast::<i64>() else {
-                            panic!("Second argument to div must be a number.")
-                        };
-
-                        InterpreterResult::Value((*l / *r).to_object())
-                    })
-                    .to_object(),
-            );
-
-            // fn mod(l: number, r: number): number
-            sys = sys.insert(
-                Symbol::new("mod").to_object(),
-                NativeObject::new()
-                    .with_call(|_, args| {
-                        if args.len() != 2 {
-                            panic!("mod expects exactly two arguments.");
-                        }
-
-                        let l = args.get(0).unwrap();
-                        let r = args.get(1).unwrap();
-
-                        let Some(l) = l.downcast::<i64>() else {
-                            panic!("First argument to mod must be a number.")
-                        };
-
-                        let Some(r) = r.downcast::<i64>() else {
-                            panic!("Second argument to mod must be a number.")
-                        };
-
-                        InterpreterResult::Value((*l % *r).to_object())
-                    })
-                    .to_object(),
-            );
-
             sys = sys.insert(
                 Symbol::new("def_local").to_object(),
                 NativeObject::new()
@@ -739,35 +467,31 @@ impl Interpreter {
                     .to_object(),
             );
 
+            // fn time(base?: number): number;
+            sys = sys.insert(
+                Symbol::new("now").to_object(),
+                NativeObject::new()
+                    .with_call(|_, args| {
+                        let base = args
+                            .get(0)
+                            .and_then(|v| v.downcast::<i64>().copied())
+                            .unwrap_or(0) as u128;
+
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_nanos();
+
+                        InterpreterResult::Value(((now - base) as i64).to_object())
+                    })
+                    .to_object(),
+            );
+
             scope
                 .define(&Symbol::new("__sys"))
                 .value
                 .set(sys.to_object())
                 .expect("failed to bind __sys metaprotocol object");
-
-            // scope
-            //     .define(&Symbol::new("_p"))
-            //     .value
-            //     .set(
-            //         NativeObject::new()
-            //             .with_call(|interpreter, args| {
-            //                 for arg in &args {
-            //                     eprintln!(
-            //                         "Arg: {}",
-            //                         arg.to_string(interpreter)
-            //                             .expect_result()
-            //                             .unwrap()
-            //                             .downcast::<value2::String>()
-            //                             .unwrap()
-            //                             .value
-            //                     );
-            //                 }
-
-            //                 InterpreterResult::Value(Nil.to_object())
-            //             })
-            //             .to_object(),
-            //     )
-            //     .expect("failed to set _p");
 
             scope
                 .define(&Symbol::new("__tokens"))

@@ -7,6 +7,10 @@ let precedence_classes = #{
     assign: 5,
 };
 
+fn now(base) {
+    __sys.now(base)
+}
+
 fn print(...values) {
     __sys.println(...values);
 }
@@ -87,7 +91,7 @@ fn lte(left, right) {
 
 #[operator(==, compare, infix)]
 fn eq(left, right) {
-    __sys.egal(left, right)
+    __sys.eq(left, right)
 }
 
 #[operator(!=, compare, infix)]
@@ -141,7 +145,6 @@ fn load_module(path) {
 }
 
 #[keyword]
-#[lang(import)]
 fn import(tokens) {
     load_module(tokens[0]);
 }
