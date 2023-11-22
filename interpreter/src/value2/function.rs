@@ -4,7 +4,7 @@ use hamt::HamtVec;
 
 use crate::{ast::Param, scope::Scope, Interpreter, InterpreterResult};
 
-use super::{block::Block, Nil, Slice, Value};
+use super::{block::Block, Slice, Value};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Function {
@@ -27,7 +27,7 @@ impl Value for Function {
         for (idx, param) in self.params.iter().enumerate() {
             match param {
                 Param::Symbol(s) => {
-                    let argument = args.get(idx).cloned().unwrap_or(Nil.to_object());
+                    let argument = args.get(idx).cloned().unwrap_or(().to_object());
 
                     call_scope
                         .define(s)

@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     ast::{Operator, OperatorPosition},
-    value2::{self, Map, Nil, Sigil, Slice, Symbol, Value},
+    value2::{self, Map, Sigil, Slice, Symbol, Value},
     Interpreter, InterpreterResult, WriteTarget,
 };
 
@@ -92,7 +92,7 @@ pub fn println(interpreter: &mut Interpreter, args: Slice) -> InterpreterResult 
 
         interpreter.host.write_std(WriteTarget::Out, "\n");
 
-        InterpreterResult::Value(Nil.to_object())
+        InterpreterResult::Value(().to_object())
     }
 }
 
@@ -133,12 +133,12 @@ fn bind_operator(interpreter: &mut Interpreter, arguments: Slice) -> Interpreter
         },
     );
 
-    InterpreterResult::Value(Nil.to_object())
+    InterpreterResult::Value(().to_object())
 }
 
 pub fn eq(_: &mut Interpreter, args: Slice) -> InterpreterResult {
-    let a = args.get(0).cloned().unwrap_or(Nil.to_object());
-    let b = args.get(1).cloned().unwrap_or(Nil.to_object());
+    let a = args.get(0).cloned().unwrap_or(().to_object());
+    let b = args.get(1).cloned().unwrap_or(().to_object());
 
     InterpreterResult::Value((a == b).to_object())
 }

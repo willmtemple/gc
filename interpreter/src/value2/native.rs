@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{Interpreter, InterpreterError, InterpreterResult};
 
-use super::{Nil, Object, Slice, Value};
+use super::{Object, Slice, Value};
 
 pub type CallImpl = fn(&mut Interpreter, Slice) -> InterpreterResult;
 pub type ToStringImpl = fn(&mut Interpreter, &NativeObject) -> InterpreterResult;
@@ -55,7 +55,7 @@ impl Value for NativeObject {
         if let Some(call) = self.call {
             call(_interpreter, args)
         } else {
-            InterpreterResult::Error(InterpreterError::UncallableValue(Nil.to_object()))
+            InterpreterResult::Error(InterpreterError::UncallableValue(().to_object()))
         }
     }
 

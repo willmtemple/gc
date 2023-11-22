@@ -25,9 +25,7 @@ use scope::Scope;
 use seglisp::{
     diagnostics::format_and_write_diagnostics_with_termcolor, read_str, ReaderConfiguration,
 };
-use value2::{
-    Block, Function, Map, NativeObject, Nil, Object, Set, Sigil, Slice, Symbol, Tuple, Value,
-};
+use value2::{Block, Function, Map, NativeObject, Object, Set, Sigil, Slice, Symbol, Tuple, Value};
 
 use crate::ast::{parse_expr, ValueOrExpr};
 
@@ -37,6 +35,7 @@ mod list;
 mod locals;
 mod scope;
 mod stm;
+mod util;
 pub mod value2;
 
 pub enum WriteTarget {
@@ -582,7 +581,7 @@ impl Interpreter {
                 if let Some(body) = r#in {
                     self.eval_expr(scope, body)?
                 } else {
-                    Nil.to_object()
+                    ().to_object()
                 }
             }
             Expr::If {
@@ -592,7 +591,7 @@ impl Interpreter {
             } => {
                 let condition = self.eval_expr(scope, condition)?;
 
-                let cr = if condition.is::<Nil>() {
+                let cr = if condition.is::<()>() {
                     false
                 } else if condition.is::<bool>() {
                     *condition.downcast::<bool>().unwrap()
@@ -605,7 +604,7 @@ impl Interpreter {
                 } else if let Some(r#else) = r#else {
                     self.eval_expr(scope, r#else)?
                 } else {
-                    Nil.to_object()
+                    ().to_object()
                 }
             }
             Expr::Map(m) => m
@@ -718,7 +717,7 @@ impl Interpreter {
                     if let Some(v) = value {
                         self.eval_expr(scope, v)?
                     } else {
-                        Nil.to_object()
+                        ().to_object()
                     }
                 }))
             }
@@ -730,11 +729,11 @@ impl Interpreter {
                     if let Some(v) = value {
                         self.eval_expr(scope, v)?
                     } else {
-                        Nil.to_object()
+                        ().to_object()
                     }
                 }))
             }
-            Expr::Nil => Nil.to_object(),
+            Expr::Nil => ().to_object(),
         };
 
         InterpreterResult::Value(v)
@@ -743,7 +742,7 @@ impl Interpreter {
     pub fn eval_block(&mut self, scope: &mut Scope, block: &Block) -> InterpreterResult {
         let Block { body } = block;
 
-        let mut result = Nil.to_object();
+        let mut result = ().to_object();
 
         for segment in body {
             let Some(expr) = segment.downcast::<value2::Vec>() else {

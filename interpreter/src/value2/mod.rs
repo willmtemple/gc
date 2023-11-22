@@ -11,23 +11,24 @@ mod block;
 mod function;
 mod hamt;
 mod native;
-mod nil;
 mod number;
 mod primitive;
 mod sigil;
 mod string;
 mod symbol;
 mod tuple;
+mod r#type;
 
 pub use block::Block;
 pub use function::Function;
 pub use hamt::{Map, Set, Slice, Vec};
 pub use native::NativeObject;
-pub use nil::Nil;
 pub use sigil::Sigil;
 pub use string::String;
 pub use symbol::Symbol;
 pub use tuple::Tuple;
+
+use self::r#type::Type;
 
 pub struct Object {
     ptr: usize,
@@ -42,6 +43,7 @@ impl Object {
             type_id: V::TYPE_ID,
             vtable: &ObjectVTable {
                 name: V::NAME,
+                _type: || Type::<V>::new().to_object(),
 
                 egal: |this, other| {
                     if TypeId::of::<V>() != other.type_id {
@@ -143,6 +145,7 @@ impl Drop for Object {
 
 pub struct ObjectVTable {
     pub name: &'static str,
+    pub _type: fn() -> Arc<Object>,
 
     pub egal: fn(*const (), &Object) -> bool,
     pub hash: fn(*const (), &mut dyn Hasher),
@@ -166,7 +169,7 @@ pub trait Value: Sized + 'static {
 
     #[allow(unused_variables)]
     fn call(&self, interpreter: &mut Interpreter, args: Slice) -> InterpreterResult {
-        InterpreterResult::Error(InterpreterError::UncallableValue(Nil.to_object()))
+        InterpreterResult::Error(InterpreterError::UncallableValue(().to_object()))
     }
 
     #[allow(unused_variables)]

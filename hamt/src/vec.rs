@@ -30,9 +30,9 @@ impl<V, Config: HamtConfig<(), V>> Clone for HamtVec<V, Config> {
     }
 }
 
-impl<V> HamtVec<V> {
+impl<V, Config: HamtConfig<(), V> + Default> HamtVec<V, Config> {
     pub fn new() -> Self {
-        Self::new_with_config(DefaultConfig::default())
+        Self::new_with_config(Config::default())
     }
 }
 

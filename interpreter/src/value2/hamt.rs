@@ -4,7 +4,7 @@ use hamt::{config::CloningConfig, vec::HamtVecSlice, HamtMap, HamtSet, HamtVec};
 
 use crate::{InterpreterError, InterpreterResult};
 
-use super::{Nil, Object, Value};
+use super::{Object, Value};
 
 pub type Map = HamtMap<Arc<Object>, Arc<Object>, CloningConfig>;
 
@@ -40,7 +40,7 @@ impl Value for Map {
 
         let key = args.get(0).unwrap();
 
-        InterpreterResult::Value(self.get(key).cloned().unwrap_or(Nil.to_object()))
+        InterpreterResult::Value(self.get(key).cloned().unwrap_or(().to_object()))
     }
 
     fn to_string(&self, interpreter: &mut crate::Interpreter) -> crate::InterpreterResult {
@@ -78,7 +78,7 @@ impl Value for Map {
     }
 
     fn get(&self, _interpreter: &mut crate::Interpreter, key: Arc<Object>) -> InterpreterResult {
-        InterpreterResult::Value(Map::get(self, &key).cloned().unwrap_or(Nil.to_object()))
+        InterpreterResult::Value(Map::get(self, &key).cloned().unwrap_or(().to_object()))
     }
 }
 
@@ -115,7 +115,7 @@ impl Value for Set {
         InterpreterResult::Value(if self.contains(key) {
             key.clone()
         } else {
-            Nil.to_object()
+            ().to_object()
         })
     }
 

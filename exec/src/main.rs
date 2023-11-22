@@ -1,7 +1,7 @@
 use std::{env::args, fs::read_to_string, path::PathBuf, sync::Arc};
 
 use interpreter::{
-    value2::{self, Nil},
+    value2::{self},
     InterpreterHost,
 };
 
@@ -60,7 +60,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    if !r.is::<Nil>() {
+    if !r.is::<()>() {
         println!(
             "{}",
             r.to_string(&mut interpreter)

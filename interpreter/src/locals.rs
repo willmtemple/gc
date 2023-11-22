@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use hamt::HamtMap;
 
-use crate::{value2::Nil, Interpreter};
+use crate::Interpreter;
 
 use crate::value2::{Object, Slice, Value};
 
@@ -92,6 +92,6 @@ pub fn set_local(_: &mut Interpreter, args: Slice) -> Arc<Object> {
 
         locals.set(index, value.clone());
 
-        Nil.to_object()
+        ().to_object()
     })
 }
