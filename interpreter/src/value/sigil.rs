@@ -15,8 +15,6 @@ impl Sigil {
 }
 
 impl Value for Sigil {
-    const NAME: &'static str = "sigil";
-
     fn egal(&self, other: &Self) -> bool {
         self.identity == other.identity
     }

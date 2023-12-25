@@ -4,13 +4,11 @@ use hamt::{config::CloningConfig, vec::HamtVecSlice, HamtMap, HamtSet, HamtVec};
 
 use crate::{InterpreterError, InterpreterResult};
 
-use super::{Object, Value};
+use super::{r#type::Type, Object, Value};
 
 pub type Map = HamtMap<Arc<Object>, Arc<Object>, CloningConfig>;
 
 impl Value for Map {
-    const NAME: &'static str = "map";
-
     fn egal(&self, other: &Self) -> bool {
         // Compare all keys and values... This is pretty expensive.
         let mut other = other.clone();
@@ -51,8 +49,8 @@ impl Value for Map {
 
             if !ks.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
-                    expected: super::String::NAME,
-                    actual: ks.type_name(),
+                    expected: Type::of::<super::String>().name(),
+                    actual: ks.get_type().name(),
                 });
             }
 
@@ -60,20 +58,20 @@ impl Value for Map {
 
             if !vs.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
-                    expected: super::String::NAME,
-                    actual: vs.type_name(),
+                    expected: Type::of::<super::String>().name(),
+                    actual: vs.get_type().name(),
                 });
             }
 
             parts.push(format!(
                 "{}: {}",
-                ks.downcast::<super::String>().unwrap().value,
-                vs.downcast::<super::String>().unwrap().value
+                ks.downcast::<super::String>().unwrap(),
+                vs.downcast::<super::String>().unwrap()
             ));
         }
 
         InterpreterResult::Value(
-            crate::value2::String::from(format!("#{{{}}}", parts.join(", "))).to_object(),
+            crate::value::String::from(format!("#{{{}}}", parts.join(", "))).to_object(),
         )
     }
 
@@ -85,8 +83,6 @@ impl Value for Map {
 pub type Set = HamtSet<Arc<Object>, CloningConfig>;
 
 impl Value for Set {
-    const NAME: &'static str = "set";
-
     fn egal(&self, other: &Self) -> bool {
         // Compare all keys and values... This is pretty expensive.
         let mut other = other.clone();
@@ -127,16 +123,16 @@ impl Value for Set {
 
             if !ks.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
-                    expected: super::String::NAME,
-                    actual: ks.type_name(),
+                    expected: Type::of::<super::String>().name(),
+                    actual: ks.get_type().name(),
                 });
             }
 
-            parts.push(ks.downcast::<super::String>().unwrap().value.clone());
+            parts.push(ks.downcast::<super::String>().unwrap().clone());
         }
 
         InterpreterResult::Value(
-            crate::value2::String::from(format!("#({})", parts.join(", "))).to_object(),
+            crate::value::String::from(format!("#({})", parts.join(", "))).to_object(),
         )
     }
 
@@ -146,11 +142,32 @@ impl Value for Set {
 }
 
 pub type Slice = HamtVecSlice<Arc<Object>, CloningConfig>;
+
 pub type Vec = HamtVec<Arc<Object>, CloningConfig>;
 
 impl Value for Vec {
-    const NAME: &'static str = "vec";
+    fn call(&self, interpreter: &mut crate::Interpreter, args: Slice) -> InterpreterResult {
+        Value::call(&self.as_slice(), interpreter, args)
+    }
 
+    fn d_hash(&self) -> InterpreterResult<u64> {
+        Value::d_hash(&self.as_slice())
+    }
+
+    fn egal(&self, other: &Self) -> bool {
+        Value::egal(&self.as_slice(), &other.as_slice())
+    }
+
+    fn get(&self, interpreter: &mut crate::Interpreter, index: Arc<Object>) -> InterpreterResult {
+        Value::get(&self.as_slice(), interpreter, index)
+    }
+
+    fn to_string(&self, interpreter: &mut crate::Interpreter) -> InterpreterResult {
+        Value::to_string(&self.as_slice(), interpreter)
+    }
+}
+
+impl Value for Slice {
     fn egal(&self, other: &Self) -> bool {
         if self.len() != other.len() {
             return false;
@@ -173,16 +190,16 @@ impl Value for Vec {
 
             if !vs.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
-                    expected: super::String::NAME,
-                    actual: vs.type_name(),
+                    expected: Type::of::<super::String>().name(),
+                    actual: vs.get_type().name(),
                 });
             }
 
-            parts.push(vs.downcast::<super::String>().unwrap().value.clone());
+            parts.push(vs.downcast::<super::String>().unwrap().clone());
         }
 
         InterpreterResult::Value(
-            crate::value2::String::from(format!("[{}]", parts.join(", "))).to_object(),
+            crate::value::String::from(format!("[{}]", parts.join(", "))).to_object(),
         )
     }
 
@@ -194,7 +211,7 @@ impl Value for Vec {
 
         let index = args.get(0).cloned().unwrap();
 
-        self.get(interpreter, index)
+        Value::get(self, interpreter, index)
     }
 
     fn get(&self, _: &mut crate::Interpreter, index: Arc<Object>) -> InterpreterResult {
@@ -205,8 +222,8 @@ impl Value for Vec {
             }
             None => {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
-                    expected: i64::NAME,
-                    actual: index.type_name(),
+                    expected: Type::of::<i64>().name(),
+                    actual: index.get_type().name(),
                 })
             }
         };

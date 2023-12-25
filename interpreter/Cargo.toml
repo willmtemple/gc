@@ -13,3 +13,4 @@ seglisp = { path = "../../seglisp/seglisp/", default-features = false, features 
 ] }
 itertools = "0.11"
 phf = { version = "0.11", features = ["macros"] }
+lazy_static = "1"

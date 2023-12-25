@@ -1,71 +1,75 @@
 use std::{
     ops::Deref,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use crate::{
     ast::{Operator, OperatorPosition},
-    value2::{self, Map, Sigil, Slice, Symbol, Value},
+    value::{self, Map, NativeFn, Sigil, Slice, Symbol, Type, Value},
     Interpreter, InterpreterResult, WriteTarget,
 };
 
+macro_rules! map_line {
+    (@$v:ident; $s:ident : $e:expr) => {
+        $v = $v.insert(
+            $crate::value::Symbol::new(stringify!($s)).to_object(),
+            $crate::value::Value::to_object($e),
+        );
+    };
+}
+
+macro_rules! map_lines {
+    (@$v:ident; $s:ident : $e:expr $(, $($rest:tt)*)?) => {
+        map_line!(@$v; $s : $e);
+
+        map_lines!(@$v; $($($rest)*)?)
+    };
+    (@$v:ident; $s:ident as $t:ty $(, $($rest:tt)*)?) => {
+        map_line!(@$v; $s: $s as $t);
+
+        map_lines!(@$v; $($($rest)*)?)
+    };
+    (@$v:ident; $s:ident $(, $($rest:tt)*)?) => {
+        map_line!(@$v; $s: $s);
+
+        map_lines!(@$v; $($($rest)*)?)
+    };
+    (@$v:ident;) => {}
+}
+
+macro_rules! map {
+    ($($tokens:tt)*) => {
+        {
+            let mut value = $crate::value::Map::new();
+
+            map_lines!(@value; $($tokens)*);
+
+            value
+        }
+    }
+}
+
 pub fn get_builtins() -> Map {
-    let mut m = Map::new();
+    let types = get_type_map();
 
-    m = m.insert(
-        Symbol::new("println").to_object(),
-        (println as fn(&mut crate::Interpreter, Slice) -> InterpreterResult).to_object(),
-    );
+    let mut m = map! {
+        types,
 
-    m = m.insert(
-        Symbol::new("bind_operator").to_object(),
-        (bind_operator as fn(&mut Interpreter, Slice) -> InterpreterResult).to_object(),
-    );
+        println as NativeFn,
+        bind_operator as NativeFn,
+        eq as NativeFn,
+        load_module as NativeFn,
+        type_of as NativeFn,
 
-    m = m.insert(
-        Symbol::new("eq").to_object(),
-        (eq as fn(&mut Interpreter, Slice) -> InterpreterResult).to_object(),
-    );
-
-    m = m.insert(
-        Symbol::new("load_module").to_object(),
-        (load_module as fn(&mut Interpreter, Slice) -> InterpreterResult).to_object(),
-    );
-
-    m = m.insert(
-        Symbol::new("add").to_object(),
-        (add as fn(i64, i64) -> i64).to_object(),
-    );
-
-    m = m.insert(
-        Symbol::new("sub").to_object(),
-        (sub as fn(i64, i64) -> i64).to_object(),
-    );
-
-    m = m.insert(
-        Symbol::new("neg").to_object(),
-        (neg as fn(i64) -> i64).to_object(),
-    );
-
-    m = m.insert(
-        Symbol::new("mul").to_object(),
-        (mul as fn(i64, i64) -> i64).to_object(),
-    );
-
-    m = m.insert(
-        Symbol::new("div").to_object(),
-        (div as fn(i64, i64) -> i64).to_object(),
-    );
-
-    m = m.insert(
-        Symbol::new("mod").to_object(),
-        (modulo as fn(i64, i64) -> i64).to_object(),
-    );
-
-    m = m.insert(
-        Symbol::new("pow").to_object(),
-        (pow as fn(i64, i64) -> i64).to_object(),
-    );
+        add as fn(i64, i64) -> i64,
+        sub as fn(i64, i64) -> i64,
+        neg as fn(i64) -> i64,
+        mul as fn(i64, i64) -> i64,
+        div as fn(i64, i64) -> i64,
+        mod: modulo as fn(i64, i64) -> i64,
+        pow as fn(i64, i64) -> i64,
+    };
 
     m
 }
@@ -84,10 +88,9 @@ pub fn println(interpreter: &mut Interpreter, args: Slice) -> InterpreterResult 
 
             let s = s.to_string(interpreter)?;
 
-            interpreter.host.write_std(
-                WriteTarget::Out,
-                &s.downcast::<value2::String>().unwrap().value,
-            );
+            interpreter
+                .host
+                .write_std(WriteTarget::Out, s.downcast::<Arc<str>>().unwrap());
         }
 
         interpreter.host.write_std(WriteTarget::Out, "\n");
@@ -111,8 +114,8 @@ fn bind_operator(interpreter: &mut Interpreter, arguments: Slice) -> Interpreter
 
     let Some(position) = arguments
         .get(3)
-        .and_then(|v| v.downcast::<value2::String>())
-        .map(|v| v.value.deref())
+        .and_then(|v| v.downcast::<Arc<str>>())
+        .map(|v| v.deref())
     else {
         panic!("Fourth argument to bind_operator should be a string.")
     };
@@ -146,8 +149,8 @@ pub fn eq(_: &mut Interpreter, args: Slice) -> InterpreterResult {
 pub fn load_module(interpreter: &mut Interpreter, args: Slice) -> InterpreterResult {
     let Some(path) = args
         .get(0)
-        .and_then(|v| v.downcast::<value2::String>())
-        .map(|v| v.value.deref())
+        .and_then(|v| v.downcast::<Arc<str>>())
+        .map(|v| v.deref())
     else {
         panic!("First argument to load_module should be a string.")
     };
@@ -183,6 +186,16 @@ pub fn load_module(interpreter: &mut Interpreter, args: Slice) -> InterpreterRes
     InterpreterResult::from(interpreter.read_and_eval_module(final_path))
 }
 
+fn type_of(interpreter: &mut Interpreter, args: Slice) -> InterpreterResult {
+    let Some(value) = args.get(0) else {
+        panic!("First argument to type_of should be a value.")
+    };
+
+    let s = value.get_type().to_object();
+
+    InterpreterResult::Value(s)
+}
+
 fn add(l: i64, r: i64) -> i64 {
     l + r
 }
@@ -209,4 +222,40 @@ fn modulo(l: i64, r: i64) -> i64 {
 
 fn pow(l: i64, r: i64) -> i64 {
     l.pow(r as u32)
+}
+
+macro_rules! type_map {
+    ($($name:ident => $ty:ty),* $(,)?) => {
+        let mut m = super::Map::new();
+
+        $(
+            m = m.insert(
+                Symbol::new(stringify!($name)).to_object(),
+                Type::of::<$ty>().to_object(),
+            );
+        )*
+
+        m
+    };
+}
+
+fn get_type_map() -> value::Map {
+    type_map! {
+        block => value::Block,
+        function => value::Function,
+
+        map => value::Map,
+        vec => value::Vec,
+        set => value::Set,
+
+        i64 => i64,
+        f64 => f64,
+        bool => bool,
+        nil => (),
+
+        string => value::String,
+        symbol => value::Symbol,
+        sigil => value::Sigil,
+        type => value::Type,
+    }
 }

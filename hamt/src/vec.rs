@@ -221,6 +221,20 @@ impl<V, Config: HamtConfig<(), V>> HamtVecSlice<V, Config> {
         }
     }
 
+    pub fn try_as_vec(&self) -> Option<HamtVec<V, Config>>
+    where
+        Config: Default,
+    {
+        if self.offset == 0 {
+            Some(HamtVec {
+                config: Default::default(),
+                slice: self.clone(),
+            })
+        } else {
+            None
+        }
+    }
+
     pub fn slice<R: RangeBounds<usize>>(&self, index: R) -> HamtVecSlice<V, Config> {
         let start = match index.start_bound() {
             core::ops::Bound::Included(&start) => start,

@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-pub struct UnorderedPair<T>(T, T);
+pub struct UnorderedPair<T>(pub T, pub T);
 
 impl<T: PartialEq> PartialEq for UnorderedPair<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -22,6 +22,21 @@ impl<T: Ord + Hash> Hash for UnorderedPair<T> {
     }
 }
 
+impl<T: Ord> PartialOrd for UnorderedPair<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T: Ord> Ord for UnorderedPair<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.a().cmp(other.a()) {
+            std::cmp::Ordering::Equal => self.b().cmp(other.b()),
+            other => other,
+        }
+    }
+}
+
 impl<T: Ord> UnorderedPair<T> {
     pub fn a(&self) -> &T {
         if matches!(self.0.cmp(&self.1), std::cmp::Ordering::Less) {
@@ -39,7 +54,7 @@ impl<T: Ord> UnorderedPair<T> {
         }
     }
 
-    pub fn to_tuple(self) -> (T, T) {
+    pub fn into_tuple(self) -> (T, T) {
         if matches!(self.0.cmp(&self.1), std::cmp::Ordering::Less) {
             (self.0, self.1)
         } else {

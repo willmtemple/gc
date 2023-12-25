@@ -111,6 +111,7 @@ dependencies = [
  "gc",
  "hamt",
  "itertools 0.11.0",
+ "lazy_static",
  "phf",
  "seglisp",
 ]

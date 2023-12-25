@@ -18,8 +18,6 @@ impl Symbol {
 }
 
 impl Value for Symbol {
-    const NAME: &'static str = "symbol";
-
     fn egal(&self, other: &Self) -> bool {
         self.name == other.name
     }
@@ -28,7 +26,6 @@ impl Value for Symbol {
         let mut hasher = DefaultHasher::new();
 
         self.name.hash(&mut hasher);
-        Self::TYPE_ID.hash(&mut hasher);
 
         crate::InterpreterResult::Value(hasher.finish())
     }

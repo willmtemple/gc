@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{InterpreterError, InterpreterResult};
 
-use super::{Object, Value};
+use super::{Object, Type, Value};
 
 pub struct Tuple {
     data: super::Vec,
@@ -28,8 +28,6 @@ impl Tuple {
 }
 
 impl Value for Tuple {
-    const NAME: &'static str = "tuple";
-
     fn egal(&self, other: &Self) -> bool {
         self.data == other.data
     }
@@ -42,8 +40,8 @@ impl Value for Tuple {
             }
             None => {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
-                    expected: i64::NAME,
-                    actual: index.type_name(),
+                    expected: Type::of::<i64>().name(),
+                    actual: index.get_type().name(),
                 })
             }
         };
@@ -65,16 +63,16 @@ impl Value for Tuple {
 
             if !vs.is::<super::String>() {
                 return InterpreterResult::Error(InterpreterError::UnexpectedType {
-                    expected: super::String::NAME,
-                    actual: vs.type_name(),
+                    expected: Type::of::<super::String>().name(),
+                    actual: vs.get_type().name(),
                 });
             }
 
-            parts.push(vs.downcast::<super::String>().unwrap().value.clone());
+            parts.push(vs.downcast::<super::String>().unwrap().clone());
         }
 
         InterpreterResult::Value(
-            crate::value2::String::from(format!("({})", parts.join(", "))).to_object(),
+            crate::value::String::from(format!("({})", parts.join(", "))).to_object(),
         )
     }
 }

@@ -5,7 +5,7 @@ use hamt::HamtMap;
 
 use crate::Interpreter;
 
-use crate::value2::{Object, Slice, Value};
+use crate::value::{Object, Slice, Value};
 
 thread_local! {
     pub static LOCALS: RefCell<Locals> = RefCell::new(Locals::new());

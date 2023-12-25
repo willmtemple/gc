@@ -1,8 +1,9 @@
 // Compile this with --no-default-features in gc.
 
 // This is an experiment to see how small a driver program for the HAMT can be once compiled. Current results on
-// x86_64-pc-windows-msvc are about 4.5 KiB, which is pretty good. The HAMT itself is around 3.5KiB of .text code. The
-// rest is core functionality, the minimal bindings to HeapAllocate and the drop/clone implementations for Arc.
+// x86_64-pc-windows-msvc are about 4.5 KiB, which is pretty good, considering the minimum size of a file is 4K. The
+// HAMT itself is around 3.5KiB of .text code. The rest is core functionality, the minimal bindings to HeapAllocate and
+// the drop/clone implementations for Arc.
 
 #![no_std]
 #![no_main]

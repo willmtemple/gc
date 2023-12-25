@@ -1,7 +1,7 @@
 use std::{env::args, fs::read_to_string, path::PathBuf, sync::Arc};
 
 use interpreter::{
-    value2::{self},
+    value::{self},
     InterpreterHost,
 };
 
@@ -66,9 +66,8 @@ fn main() {
             r.to_string(&mut interpreter)
                 .expect_result()
                 .unwrap()
-                .downcast::<value2::String>()
+                .downcast::<value::String>()
                 .unwrap()
-                .value
         );
     }
 }

@@ -1,6 +1,7 @@
 #![feature(try_trait_v2)]
 #![feature(let_chains)]
 #![feature(const_type_id)]
+#![feature(const_type_name)]
 
 use std::{
     convert::Infallible,
@@ -16,16 +17,15 @@ enum ExitCode {
     Panic = 1,
 }
 
-use ast::{
-    parse_exprs, seglisp_body_to_block, Expr, Operator, OperatorPosition, ParseError, TokenStream,
-};
+use ast::{Expr, Operator, OperatorPosition, ParseError, TokenStream};
 use hamt::{HamtMap, HamtVec};
 use list::List;
-use scope::Scope;
+use read::seglisp_body_to_block;
+use scope::{Let, LexicalEnvironment, OldScope};
 use seglisp::{
     diagnostics::format_and_write_diagnostics_with_termcolor, read_str, ReaderConfiguration,
 };
-use value2::{Block, Function, Map, NativeObject, Object, Set, Sigil, Slice, Symbol, Tuple, Value};
+use value::{Block, Function, Map, NativeObject, Object, Set, Sigil, Slice, Symbol, Tuple, Value};
 
 use crate::ast::{parse_expr, ValueOrExpr};
 
@@ -33,10 +33,12 @@ mod ast;
 mod builtins;
 mod list;
 mod locals;
+pub mod protocol;
+pub mod read;
 mod scope;
 mod stm;
 mod util;
-pub mod value2;
+pub mod value;
 
 pub enum WriteTarget {
     Out,
@@ -58,7 +60,7 @@ pub trait InterpreterHost {
 pub struct Interpreter {
     host: Box<dyn InterpreterHost>,
     call_stack: List<CallFrame>,
-    boot_scope: Scope,
+    boot_scope: OldScope,
     operators: HamtMap<(Sigil, OperatorPosition), Operator>,
     sigils: Sigils,
 }
@@ -109,6 +111,8 @@ pub enum InterpreterError {
     ModuleNotFound(PathBuf),
     ReadError,
     ParseError(ParseError),
+    UnknownName(Arc<str>),
+    Rebind(Symbol),
     UncallableValue(Arc<Object>),
     UnexpectedControlFlow(ControlFlow),
     NotIndexable(Arc<Object>),
@@ -226,7 +230,7 @@ pub enum ControlFlow {
 
 impl Interpreter {
     pub fn new(host: Box<dyn InterpreterHost>) -> Self {
-        let mut boot_scope = Scope::new();
+        let mut boot_scope = OldScope::new();
 
         let mut intermediate_interpreter = Self {
             host,
@@ -283,7 +287,7 @@ impl Interpreter {
             .deref()
     }
 
-    fn run_boot_file(&mut self, scope: &mut Scope) -> Result<Arc<Object>, InterpreterError> {
+    fn run_boot_file(&mut self, scope: &mut OldScope) -> Result<Arc<Object>, InterpreterError> {
         let config = ReaderConfiguration::default();
 
         let module_path = self.host.load_boot_module();
@@ -318,8 +322,8 @@ impl Interpreter {
                     .with_call(|_, arguments| {
                         let Some(prefix) = arguments
                             .get(3)
-                            .and_then(|v| v.downcast::<value2::String>())
-                            .map(|v| v.value.deref())
+                            .and_then(|v| v.downcast::<Arc<str>>())
+                            .map(|v| v.deref())
                         else {
                             panic!("First argument to gensym should be a string.")
                         };
@@ -339,8 +343,10 @@ impl Interpreter {
 
                         let value = arguments.get(0).unwrap();
 
+                        eprintln!("get_type_name: {:?}", value.get_type().name());
+
                         InterpreterResult::Value(
-                            value2::String::from(value.type_name()).to_object(),
+                            Arc::<str>::from(value.get_type().name()).to_object(),
                         )
                     })
                     .to_object(),
@@ -354,15 +360,13 @@ impl Interpreter {
                             panic!("panic expects exactly one argument.");
                         }
 
-                        let Some(message) = arguments
-                            .get(0)
-                            .and_then(|v| v.downcast::<value2::String>())
+                        let Some(message) = arguments.get(0).and_then(|v| v.downcast::<Arc<str>>())
                         else {
                             panic!("Argument to panic must be a string.")
                         };
 
                         eprintln!("Panic.");
-                        eprintln!("{}", message.value);
+                        eprintln!("{}", message);
 
                         exit(ExitCode::Panic as i32);
                     })
@@ -380,7 +384,7 @@ impl Interpreter {
 
                         let data = args.get(0).unwrap();
 
-                        let Some(data) = data.downcast::<value2::Vec>() else {
+                        let Some(data) = data.downcast::<value::Vec>() else {
                             panic!("Argument to len must be an array.")
                         };
 
@@ -402,7 +406,7 @@ impl Interpreter {
                         let start = args.get(1).unwrap();
                         let end = args.get(2).unwrap();
 
-                        let Some(data) = data.downcast::<value2::Vec>() else {
+                        let Some(data) = data.downcast::<value::Vec>() else {
                             panic!("First argument to slice must be an array.")
                         };
 
@@ -414,11 +418,29 @@ impl Interpreter {
                             panic!("Third argument to slice must be a number.")
                         };
 
-                        let data = data.slice((*start as usize)..(*end as usize));
-
                         InterpreterResult::Value(
-                            data.iter().cloned().collect::<value2::Vec>().to_object(),
+                            data.slice((*start as usize)..(*end as usize)).to_object(),
                         )
+                    })
+                    .to_object(),
+            );
+
+            // fn strcat(...args: string[]): string
+            sys = sys.insert(
+                Symbol::new("strcat").to_object(),
+                NativeObject::new()
+                    .with_call(|_, args| {
+                        let mut result = String::new();
+
+                        for arg in &args {
+                            let Some(arg) = arg.downcast::<Arc<str>>() else {
+                                panic!("Arguments to strcat must be strings.")
+                            };
+
+                            result.push_str(arg.deref());
+                        }
+
+                        InterpreterResult::Value(Arc::<str>::from(result).to_object())
                     })
                     .to_object(),
             );
@@ -486,17 +508,16 @@ impl Interpreter {
                     .to_object(),
             );
 
-            scope
-                .define(&Symbol::new("__sys"))
-                .value
-                .set(sys.to_object())
-                .expect("failed to bind __sys metaprotocol object");
+            let __sys = Symbol::new("__sys");
 
-            scope
-                .define(&Symbol::new("__tokens"))
-                .value
-                .set(module.clone().to_object())
-                .expect("fatal error: __tokens binding is already set, somehow");
+            scope.define(__sys.clone(), Let::with_value(__sys, sys.to_object()));
+
+            let __tokens = Symbol::new("__tokens");
+
+            scope.define(
+                __tokens.clone(),
+                Let::with_value(__tokens, module.clone().to_object()),
+            );
 
             self.call_stack = self.call_stack.push_start(CallFrame {
                 module: module_path.unwrap().clone(),
@@ -561,25 +582,24 @@ impl Interpreter {
         }
     }
 
-    fn eval_expr(&mut self, scope: &mut Scope, expr: &Expr) -> InterpreterResult {
+    fn eval_expr(&mut self, expr: &Expr, env: LexicalEnvironment) -> InterpreterResult {
         let v = match expr {
-            Expr::Quote(tokens) => quote_substitute(self, scope, tokens.clone())?.to_object(),
+            Expr::Quote(tokens) => quote_substitute(self, tokens.clone(), env)?.to_object(),
             Expr::Fn { name, params, body } => Function {
                 name: name.as_ref().map(|v| v.name.clone()),
                 params: params.clone(),
                 body: body.clone(),
-                scope: scope.clone(),
             }
             .to_object(),
             Expr::Let { name, value, r#in } => {
-                let v = self.eval_expr(scope, value)?;
+                let Some(binding) = env.get_binding(name) else {
+                    panic!("no binding for '{}' in eval_expr", name.name());
+                };
 
-                scope.define(name).value.set(v.clone()).unwrap_or_else(|_| {
-                    panic!("failed to bind '{}': value already set", name.name)
-                });
+                binding.set(self.eval_expr(expr, env)?);
 
                 if let Some(body) = r#in {
-                    self.eval_expr(scope, body)?
+                    self.eval_expr(body, env)?
                 } else {
                     ().to_object()
                 }
@@ -589,7 +609,7 @@ impl Interpreter {
                 then,
                 r#else,
             } => {
-                let condition = self.eval_expr(scope, condition)?;
+                let condition = self.eval_expr(condition, env)?;
 
                 let cr = if condition.is::<()>() {
                     false
@@ -600,9 +620,9 @@ impl Interpreter {
                 };
 
                 if cr {
-                    self.eval_expr(scope, then)?
+                    self.eval_expr(then, env)?
                 } else if let Some(r#else) = r#else {
-                    self.eval_expr(scope, r#else)?
+                    self.eval_expr(r#else, env)?
                 } else {
                     ().to_object()
                 }
@@ -610,10 +630,7 @@ impl Interpreter {
             Expr::Map(m) => m
                 .iter()
                 .map(|(k, v)| -> InterpreterResult<(Arc<Object>, Arc<Object>)> {
-                    InterpreterResult::Value((
-                        self.eval_expr(&mut scope.clone(), k)?,
-                        self.eval_expr(&mut scope.clone(), v)?,
-                    ))
+                    InterpreterResult::Value((self.eval_expr(k, env)?, self.eval_expr(v, env)?))
                 })
                 .collect::<InterpreterResult<Map>>()?
                 .to_object(),
@@ -626,23 +643,21 @@ impl Interpreter {
             Expr::Vec(v) => v
                 .iter()
                 .map(|v| InterpreterResult::Value(self.eval_expr(&mut scope.clone(), v)?))
-                .collect::<InterpreterResult<value2::Vec>>()?
+                .collect::<InterpreterResult<value::Vec>>()?
                 .to_object(),
             Expr::Tuple(t) => Tuple::new(
                 t.iter()
                     .map(|v| InterpreterResult::Value(self.eval_expr(&mut scope.clone(), v)?))
-                    .collect::<InterpreterResult<value2::Vec>>()?,
+                    .collect::<InterpreterResult<value::Vec>>()?,
             )
             .to_object(),
-            Expr::Number(n) => n.to_object(),
-            Expr::Boolean(b) => b.to_object(),
-            Expr::String(s) => value2::String::from(s.clone()).to_object(),
-            Expr::Symbol(s) => s.clone().to_object(),
+            Expr::Literal(v) => v.clone(),
             Expr::Name(n) => scope
                 .resolve(n)
-                .unwrap_or_else(|| {
-                    panic!("unbound name {}", n.name);
-                })
+                .map(InterpreterResult::Value)
+                .unwrap_or(InterpreterResult::Error(InterpreterError::UnknownName(
+                    n.clone(),
+                )))?
                 .clone(),
             Expr::Block(blk) => self.eval_block(&mut scope.clone(), blk)?,
             Expr::Access { base, key } => {
@@ -674,8 +689,8 @@ impl Interpreter {
                                 return vec![v];
                             };
 
-                            if v.is::<value2::Vec>() {
-                                v.downcast::<value2::Vec>()
+                            if v.is::<value::Vec>() {
+                                v.downcast::<value::Vec>()
                                     .unwrap()
                                     .iter()
                                     .cloned()
@@ -693,11 +708,11 @@ impl Interpreter {
                             }
                         }
                     })
-                    .collect::<InterpreterResult<value2::Vec>>()?;
+                    .collect::<InterpreterResult<value::Vec>>()?;
 
                 callee.call(self, args.as_slice())?
             }
-            Expr::Loop { body } => {
+            Expr::Loop { id: _id, body } => {
                 let mut loop_scope = scope.clone();
 
                 loop {
@@ -721,7 +736,7 @@ impl Interpreter {
                     }
                 }))
             }
-            Expr::Continue => {
+            Expr::Continue { id: _id } => {
                 return InterpreterResult::Control(ControlFlow::Continue);
             }
             Expr::Return { value } => {
@@ -733,28 +748,21 @@ impl Interpreter {
                     }
                 }))
             }
-            Expr::Nil => ().to_object(),
         };
 
         InterpreterResult::Value(v)
     }
 
-    pub fn eval_block(&mut self, scope: &mut Scope, block: &Block) -> InterpreterResult {
-        let Block { body } = block;
-
+    pub fn eval_block(&mut self, block: &Block) -> InterpreterResult {
         let mut result = ().to_object();
 
-        for segment in body {
-            let Some(expr) = segment.downcast::<value2::Vec>() else {
-                unreachable!("segment should always parse as a vec")
-            };
+        let (mut scope, parsed) = block.parsed(self, scope)?;
 
-            let exprs = parse_exprs(self, scope, &mut TokenStream::new(expr.as_slice()))
-                .map_err(InterpreterError::ParseError)?;
+        eprintln!("Dumping scope:");
+        scope.dump();
 
-            for expr in &exprs {
-                result = self.eval_expr(scope, expr)?;
-            }
+        for expr in &parsed {
+            result = self.eval_expr(&mut scope, expr)?;
         }
 
         InterpreterResult::Value(result)
@@ -763,10 +771,10 @@ impl Interpreter {
 
 fn quote_substitute(
     interpreter: &mut Interpreter,
-    scope: &Scope,
     tokens: Slice,
-) -> InterpreterResult<value2::Vec> {
-    let mut result = value2::Vec::default();
+    env: LexicalEnvironment,
+) -> InterpreterResult<value::Vec> {
+    let mut result = value::Vec::default();
 
     let mut stream = TokenStream::new(tokens);
 
@@ -777,18 +785,19 @@ fn quote_substitute(
 
                 match stream.next() {
                     Some(name) if name.is::<Symbol>() => {
-                        let name = name.downcast::<Symbol>().unwrap();
-                        let value = scope
-                            .resolve(name)
-                            .unwrap_or_else(|| panic!("unbound symbol: {}", name.name))
-                            .clone();
+                        // let name = name.downcast::<Symbol>().unwrap();
+                        // let value = scope
+                        //     .resolve(name)
+                        //     .unwrap_or_else(|| panic!("unbound symbol: {}", name.name))
+                        //     .clone();
 
-                        result = result.push(value);
+                        // result = result.push(value);
+                        unimplemented!("dynamic name binding in lexical environment")
                     }
                     Some(t) if t.downcast::<Tuple>().map(|t| t.len() == 1) == Some(true) => {
                         let t = t.downcast::<Tuple>().unwrap();
                         let t = t.data().as_slice();
-                        let Some(v) = t.get(0).and_then(|v| v.downcast::<value2::Vec>()) else {
+                        let Some(v) = t.get(0).and_then(|v| v.downcast::<value::Vec>()) else {
                             panic!("expected tuple to contain a vec")
                         };
 
@@ -814,7 +823,7 @@ fn quote_substitute(
                         let value = interpreter.eval_expr(&mut scope.clone(), &expr)?;
 
                         if should_spread {
-                            let Some(v) = value.downcast::<value2::Vec>() else {
+                            let Some(v) = value.downcast::<value::Vec>() else {
                                 panic!("expected value to be a vec")
                             };
 
@@ -831,10 +840,8 @@ fn quote_substitute(
             Some(b) if b.is::<Block>() => {
                 let b = b.downcast::<Block>().unwrap();
                 result = result.push(
-                    Block {
-                        body: quote_substitute(interpreter, scope, b.body.as_slice())?,
-                    }
-                    .to_object(),
+                    Block::new(quote_substitute(interpreter, scope, b.body.as_slice())?)
+                        .to_object(),
                 );
             }
             Some(m) if m.is::<Map>() => {
@@ -845,12 +852,12 @@ fn quote_substitute(
                     let k = quote_substitute(
                         interpreter,
                         scope,
-                        value2::Vec::default().push(k.clone()).as_slice(),
+                        value::Vec::default().push(k.clone()).as_slice(),
                     )?;
                     let k = k.as_slice();
                     let k = k.get(0).unwrap();
 
-                    let Some(v) = v.downcast::<value2::Vec>() else {
+                    let Some(v) = v.downcast::<value::Vec>() else {
                         panic!("Expected value-side of mapline to be a vec.");
                     };
 
@@ -863,8 +870,8 @@ fn quote_substitute(
                 result = result.push(hm.to_object());
             }
             Some(s) if s.is::<Set>() => todo!(),
-            Some(v) if v.is::<value2::Vec>() => {
-                let v = v.downcast::<value2::Vec>().unwrap();
+            Some(v) if v.is::<value::Vec>() => {
+                let v = v.downcast::<value::Vec>().unwrap();
                 result =
                     result.push(quote_substitute(interpreter, scope, v.as_slice())?.to_object())
             }

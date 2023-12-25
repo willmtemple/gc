@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{Interpreter, InterpreterError, InterpreterResult};
 
-use super::{Object, Slice, Value};
+use super::{Object, Slice, Type, Value};
 
 pub type CallImpl = fn(&mut Interpreter, Slice) -> InterpreterResult;
 pub type ToStringImpl = fn(&mut Interpreter, &NativeObject) -> InterpreterResult;
@@ -45,8 +45,6 @@ impl NativeObject {
 }
 
 impl Value for NativeObject {
-    const NAME: &'static str = "object";
-
     fn egal(&self, other: &Self) -> bool {
         std::ptr::eq(self, other)
     }
@@ -75,14 +73,17 @@ impl Value for NativeObject {
         if let Some(get) = self.get {
             get(_interpreter, self, _key)
         } else {
-            InterpreterResult::Error(InterpreterError::ProtocolNotImplemented("Get", Self::NAME))
+            InterpreterResult::Error(InterpreterError::ProtocolNotImplemented(
+                "Get",
+                Type::of::<Self>().name(),
+            ))
         }
     }
 }
 
-impl Value for fn(&mut Interpreter, Slice) -> InterpreterResult {
-    const NAME: &'static str = "function";
+pub type NativeFn = fn(&mut Interpreter, Slice) -> InterpreterResult;
 
+impl Value for NativeFn {
     fn egal(&self, other: &Self) -> bool {
         core::ptr::eq(self, other)
     }
@@ -97,9 +98,8 @@ impl Value for fn(&mut Interpreter, Slice) -> InterpreterResult {
 }
 
 macro_rules! impl_value_for_fn {
-    ($($t:ident)*) => {
+    ($($t:ident),*) => {
         impl<$($t : Value + Clone,)* R: Value> Value for fn($($t),*) -> R {
-            const NAME: &'static str = "function";
 
             fn egal(&self, other: &Self) -> bool {
                 core::ptr::eq(self, other)
@@ -117,7 +117,7 @@ macro_rules! impl_value_for_fn {
                                     .and_then(|v| v.downcast::<$t>().map(InterpreterResult::Value))
                                     .unwrap_or(InterpreterResult::Error(
                                         InterpreterError::ArgumentError {
-                                            expected: <$t as Value>::NAME,
+                                            expected: Type::of::<$t>().name(),
                                             position: idx,
                                         },
                                     ))?;
@@ -133,46 +133,54 @@ macro_rules! impl_value_for_fn {
     };
 }
 
+impl_value_for_fn!();
 impl_value_for_fn!(T1);
+impl_value_for_fn!(T1, T2);
+impl_value_for_fn!(T1, T2, T3);
+impl_value_for_fn!(T1, T2, T3, T4);
+impl_value_for_fn!(T1, T2, T3, T4, T5);
+impl_value_for_fn!(T1, T2, T3, T4, T5, T6);
+impl_value_for_fn!(T1, T2, T3, T4, T5, T6, T7);
+impl_value_for_fn!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl_value_for_fn!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+impl_value_for_fn!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
 
-impl<T1: Value + Clone, T2: Value + Clone, R: Value> Value for fn(T1, T2) -> R {
-    const NAME: &'static str = "function";
+// impl<T1: Value + Clone, T2: Value + Clone, R: Value> Value for fn(T1, T2) -> R {
+//     fn egal(&self, other: &Self) -> bool {
+//         core::ptr::eq(self, other)
+//     }
 
-    fn egal(&self, other: &Self) -> bool {
-        core::ptr::eq(self, other)
-    }
+//     fn call(&self, _: &mut Interpreter, args: Slice) -> InterpreterResult {
+//         let mut idx = 0;
+//         InterpreterResult::Value(
+//             self(
+//                 #[allow(unused_assignments)]
+//                 {
+//                     let r = args
+//                         .get(idx)
+//                         .and_then(|v| v.downcast::<T1>().map(InterpreterResult::Value))
+//                         .unwrap_or(InterpreterResult::Error(InterpreterError::ArgumentError {
+//                             expected: Type::of::<T1>().name(),
+//                             position: idx,
+//                         }))?;
+//                     idx += 1;
+//                     r.clone()
+//                 },
+//                 #[allow(unused_assignments)]
+//                 {
+//                     let r = args
+//                         .get(idx)
+//                         .and_then(|v| v.downcast::<T2>().map(InterpreterResult::Value))
+//                         .unwrap_or(InterpreterResult::Error(InterpreterError::ArgumentError {
+//                             expected: Type::of::<T2>().name(),
+//                             position: idx,
+//                         }))?;
+//                     idx += 1;
 
-    fn call(&self, _: &mut Interpreter, args: Slice) -> InterpreterResult {
-        let mut idx = 0;
-        InterpreterResult::Value(
-            self(
-                #[allow(unused_assignments)]
-                {
-                    let r = args
-                        .get(idx)
-                        .and_then(|v| v.downcast::<T1>().map(InterpreterResult::Value))
-                        .unwrap_or(InterpreterResult::Error(InterpreterError::ArgumentError {
-                            expected: T1::NAME,
-                            position: idx,
-                        }))?;
-                    idx += 1;
-                    r.clone()
-                },
-                #[allow(unused_assignments)]
-                {
-                    let r = args
-                        .get(idx)
-                        .and_then(|v| v.downcast::<T2>().map(InterpreterResult::Value))
-                        .unwrap_or(InterpreterResult::Error(InterpreterError::ArgumentError {
-                            expected: T1::NAME,
-                            position: idx,
-                        }))?;
-                    idx += 1;
-
-                    r.clone()
-                },
-            )
-            .to_object(),
-        )
-    }
-}
+//                     r.clone()
+//                 },
+//             )
+//             .to_object(),
+//         )
+//     }
+// }

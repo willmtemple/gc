@@ -1,10 +1,18 @@
+// -- PRIMITIVE TYPES ----------------------------------------------------------
+let string = __sys.types.string;
+let i64 = __sys.types.i64;
+let symbol = __sys.types.symbol;
+let sigil = __sys.types.sigil;
+let type = __sys.types.type;
+
 let precedence_classes = #{
     factor: 0,
     term: 1,
     compare: 2,
     logical: 3,
-    nil_coalesce: 4,
-    assign: 5,
+    is: 4,
+    nil_coalesce: 5,
+    assign: 6,
 };
 
 fn now(base) {
@@ -33,6 +41,15 @@ fn operator(subject, sigil_tokens, class_tokens, position_tokens) {
     position_class,
   );
 }
+
+// #[operator(:, is, infix)]
+// fn is(v, type) {
+//     if __sys.type_of(type) != type {
+//         panic("is: type must be a type");
+//     }
+// 
+//     __sys.type_of(v) == type
+// }
 
 #[operator(+, factor, infix)]
 fn add(left, right) {
@@ -151,13 +168,13 @@ fn import(tokens) {
 
 /// Creates a new unbound symbol with the given name. The symbol is guaranteed
 /// to be globally unique.
-fn symbol(name) {
+fn gensym(name) {
     __sys.gensym(name)
 }
 
-/// Produces the type name of the given value.
+/// Produces the type of the given value.
 fn type(value) {
-    __sys.get_type_name(value)
+    __sys.type_of(value)
 }
 
 /// Terminates the currently-executing thread with the given message.
@@ -192,6 +209,11 @@ fn size(v) {
 /// (inclusive) and ending at the given index [end] (exclusive).
 fn slice(v, start, end) {
     __sys.slice(v, start, end)
+}
+
+/// Concatenates the given arguments into strings and produces the result.
+fn strcat(...values) {
+    __sys.strcat(...values)
 }
 
 /// Produces a [Sequence] from the given vector.
@@ -264,9 +286,10 @@ fn for(binding, in, ...rest) {
 
 #[keyword]
 fn local(name, eq, ...expr) {
-    assert(type(name) == "symbol", "local name must be a symbol");
+    print(type(name), symbol);
+    assert(type(name) == symbol, strcat("local name must be a symbol, found:", "not a symbol"));
     assert(
-        (type(eq) == "sigil") && (str(eq) == "="),
+        (type(eq) == sigil) && (str(eq) == "="),
         "local must use '=' sigil"
     );
 
@@ -295,3 +318,4 @@ fn assign(dest, value) {
         panic("assignment destination must be a local")
     }
 }
+

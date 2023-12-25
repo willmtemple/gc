@@ -1,5 +1,4 @@
 use std::{
-    any::TypeId,
     fmt::{self, Debug, Formatter},
     hash::{Hash, Hasher},
     sync::Arc,
@@ -19,20 +18,18 @@ mod symbol;
 mod tuple;
 mod r#type;
 
-pub use block::Block;
+pub use block::{Block, LexicalBlock};
 pub use function::Function;
 pub use hamt::{Map, Set, Slice, Vec};
-pub use native::NativeObject;
+pub use native::{NativeFn, NativeObject};
+pub use r#type::Type;
 pub use sigil::Sigil;
 pub use string::String;
 pub use symbol::Symbol;
 pub use tuple::Tuple;
 
-use self::r#type::Type;
-
 pub struct Object {
     ptr: usize,
-    type_id: TypeId,
     vtable: &'static ObjectVTable,
 }
 
@@ -40,13 +37,10 @@ impl Object {
     pub fn new<V: Value + 'static>(v: V) -> Self {
         Self {
             ptr: Box::into_raw(Box::new(v)) as usize,
-            type_id: V::TYPE_ID,
             vtable: &ObjectVTable {
-                name: V::NAME,
-                _type: || Type::<V>::new().to_object(),
-
+                r#type: || Type::of::<V>(),
                 egal: |this, other| {
-                    if TypeId::of::<V>() != other.type_id {
+                    if Type::of::<V>() != other.get_type() {
                         return false;
                     }
 
@@ -79,12 +73,8 @@ impl Object {
         }
     }
 
-    pub fn type_name(&self) -> &'static str {
-        self.vtable.name
-    }
-
-    pub fn type_id(&self) -> TypeId {
-        self.type_id
+    pub fn get_type(&self) -> Type {
+        (self.vtable.r#type)()
     }
 
     pub fn call(&self, interpreter: &mut Interpreter, args: Slice) -> InterpreterResult {
@@ -101,7 +91,7 @@ impl Object {
 
     #[inline(always)]
     pub fn is<V: Value + 'static>(&self) -> bool {
-        self.type_id == TypeId::of::<V>()
+        self.get_type() == Type::of::<V>()
     }
 
     pub fn downcast<V: Value + 'static>(&self) -> Option<&V> {
@@ -133,7 +123,12 @@ impl Hash for Object {
 
 impl Debug for Object {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{{{}@{:p}}}", self.type_name(), self.ptr as *const ())
+        write!(
+            f,
+            "{{{}@{:p}}}",
+            self.get_type().name(),
+            self.ptr as *const ()
+        )
     }
 }
 
@@ -144,8 +139,7 @@ impl Drop for Object {
 }
 
 pub struct ObjectVTable {
-    pub name: &'static str,
-    pub _type: fn() -> Arc<Object>,
+    pub r#type: fn() -> Type,
 
     pub egal: fn(*const (), &Object) -> bool,
     pub hash: fn(*const (), &mut dyn Hasher),
@@ -158,13 +152,13 @@ pub struct ObjectVTable {
 }
 
 pub trait Value: Sized + 'static {
-    const NAME: &'static str;
-    const TYPE_ID: TypeId = TypeId::of::<Self>();
-
     fn egal(&self, other: &Self) -> bool;
 
     fn d_hash(&self) -> InterpreterResult<u64> {
-        InterpreterResult::Error(InterpreterError::ProtocolNotImplemented("Hash", Self::NAME))
+        InterpreterResult::Error(InterpreterError::ProtocolNotImplemented(
+            "Hash",
+            Type::of::<Self>().name(),
+        ))
     }
 
     #[allow(unused_variables)]
@@ -176,16 +170,31 @@ pub trait Value: Sized + 'static {
     fn to_string(&self, interpreter: &mut Interpreter) -> InterpreterResult {
         InterpreterResult::Error(InterpreterError::ProtocolNotImplemented(
             "As<string>",
-            Self::NAME,
+            Type::of::<Self>().name(),
         ))
     }
 
     #[allow(unused_variables)]
     fn get(&self, interpreter: &mut Interpreter, _key: Arc<Object>) -> InterpreterResult {
-        InterpreterResult::Error(InterpreterError::ProtocolNotImplemented("Get", Self::NAME))
+        InterpreterResult::Error(InterpreterError::ProtocolNotImplemented(
+            "Get",
+            Type::of::<Self>().name(),
+        ))
     }
 
     fn to_object(self) -> Arc<Object> {
         Object::new(self).into()
     }
 }
+
+// macro_rules! impl_value {
+//     { $v:vis impl for $t:ty as $wrapped:ident { $($body:tt)* } } => {
+//         $v struct $wrapped($t);
+
+//         impl Value for $wrapped {
+//             const NAME: &'static str = stringify!($wrapped);
+
+//             $($body)*
+//         }
+//     };
+// }
